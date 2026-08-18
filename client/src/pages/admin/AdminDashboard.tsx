@@ -1,0 +1,244 @@
+import * as React from 'react'
+import { Link } from 'react-router-dom'
+import { TrendingUp, Calendar, BookOpen, Users, ArrowUpRight } from 'lucide-react'
+import { getAdminStats, ALL_BOOKINGS } from '@/lib/adminMockData'
+import { formatPrice, formatEventDate } from '@/lib/formatters'
+import { EVENTS } from '@/lib/mockData'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
+
+function KpiCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  accent,
+}: {
+  label: string
+  value: string
+  sub?: string
+  icon: React.ElementType
+  accent?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-[var(--radius-card)] border-[0.5px] p-5',
+        accent
+          ? 'border-marquee-gold/30 bg-ink text-ticket-paper'
+          : 'border-border bg-card shadow-[var(--shadow-card)]',
+      )}
+    >
+      <div className="flex items-start justify-between">
+        <p className={cn('text-[13px] font-medium', accent ? 'text-marquee-gold/80' : 'text-text-secondary')}>
+          {label}
+        </p>
+        <span
+          className={cn(
+            'flex size-8 items-center justify-center rounded-[6px]',
+            accent ? 'bg-marquee-gold/15' : 'bg-surface-sunk',
+          )}
+        >
+          <Icon className={cn('size-4', accent ? 'text-marquee-gold' : 'text-text-secondary')} />
+        </span>
+      </div>
+      <p
+        className={cn(
+          'mt-3 font-mono text-[28px] font-medium leading-none tracking-[-0.02em]',
+          accent ? 'text-ticket-paper' : 'text-foreground',
+        )}
+      >
+        {value}
+      </p>
+      {sub && (
+        <p className={cn('mt-1.5 text-[12px]', accent ? 'text-ticket-paper/50' : 'text-text-muted')}>
+          {sub}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function BookingStatusBadge({ status }: { status: 'confirmed' | 'cancelled' }) {
+  return (
+    <Badge variant={status === 'confirmed' ? 'confirmed' : 'cancelled'}>
+      {status === 'confirmed' ? 'Confirmed' : 'Cancelled'}
+    </Badge>
+  )
+}
+
+export function AdminDashboard() {
+  const stats = React.useMemo(() => getAdminStats(), [])
+  const recentBookings = ALL_BOOKINGS.slice(0, 8)
+  const topEvents = [...EVENTS]
+    .sort((a, b) => b.seats.filter((s) => s.status === 'booked').length - a.seats.filter((s) => s.status === 'booked').length)
+    .slice(0, 4)
+
+  return (
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      {/* Page header */}
+      <div className="mb-8">
+        <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+          Overview
+        </p>
+        <h1 className="mt-1 font-voice text-[36px] font-medium leading-tight tracking-[-0.02em]">
+          Dashboard
+        </h1>
+      </div>
+
+      {/* KPI grid */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard
+          label="Total Revenue"
+          value={formatPrice(stats.totalRevenue)}
+          sub="Confirmed bookings only"
+          icon={TrendingUp}
+          accent
+        />
+        <KpiCard
+          label="Bookings"
+          value={String(stats.totalBookings)}
+          sub={`${stats.confirmedBookings} confirmed · ${stats.cancelledBookings} cancelled`}
+          icon={BookOpen}
+        />
+        <KpiCard
+          label="Events"
+          value={String(stats.totalEvents)}
+          sub={`${stats.upcomingEvents} scheduled`}
+          icon={Calendar}
+        />
+        <KpiCard
+          label="Occupancy"
+          value={`${stats.occupancyRate}%`}
+          sub={`${stats.bookedSeats.toLocaleString()} of ${stats.totalSeats.toLocaleString()} seats`}
+          icon={Users}
+        />
+      </div>
+
+      {/* Occupancy bar */}
+      <div className="mt-6 rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-5 shadow-[var(--shadow-card)]">
+        <div className="flex items-center justify-between">
+          <p className="text-[13px] font-medium text-text-secondary">House occupancy across all events</p>
+          <p className="font-mono text-[13px] text-text-muted">
+            {stats.bookedSeats} / {stats.totalSeats} seats
+          </p>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-sunk">
+          <div
+            className="h-full rounded-full bg-stamp-red transition-all"
+            style={{ width: `${stats.occupancyRate}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-6 lg:grid-cols-3">
+        {/* Recent bookings */}
+        <div className="lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[17px] font-medium">Recent bookings</h2>
+            <Link
+              to="/admin/bookings"
+              className="flex items-center gap-1 text-[13px] text-stamp-red hover:underline"
+            >
+              View all <ArrowUpRight className="size-3.5" />
+            </Link>
+          </div>
+          <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card shadow-[var(--shadow-card)] overflow-hidden">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b-[0.5px] border-border bg-surface-sunk">
+                  <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Ref
+                  </th>
+                  <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Fan
+                  </th>
+                  <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
+                    Event
+                  </th>
+                  <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Total
+                  </th>
+                  <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentBookings.map((b, i) => (
+                  <tr
+                    key={b.id}
+                    className={cn(
+                      'transition-colors hover:bg-surface-sunk/50',
+                      i < recentBookings.length - 1 && 'border-b-[0.5px] border-border',
+                    )}
+                  >
+                    <td className="px-4 py-3 font-mono text-[12px] text-text-secondary">
+                      {b.reference}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium leading-tight">{b.customerName}</p>
+                      <p className="text-[11px] text-text-muted">{b.customerEmail}</p>
+                    </td>
+                    <td className="hidden px-4 py-3 text-text-secondary md:table-cell">
+                      {b.event.title}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {formatPrice(b.totalPrice)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <BookingStatusBadge status={b.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Top events */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[17px] font-medium">Top events</h2>
+            <Link
+              to="/admin/events"
+              className="flex items-center gap-1 text-[13px] text-stamp-red hover:underline"
+            >
+              Manage <ArrowUpRight className="size-3.5" />
+            </Link>
+          </div>
+          <div className="flex flex-col gap-3">
+            {topEvents.map((evt) => {
+              const booked = evt.seats.filter((s) => s.status === 'booked').length
+              const pct = Math.round((booked / evt.totalSeats) * 100)
+              return (
+                <Link
+                  key={evt.id}
+                  to={`/admin/events/${evt.id}/edit`}
+                  className="group block rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-4 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-lift)]"
+                >
+                  <p className="font-medium leading-tight group-hover:text-stamp-red transition-colors">
+                    {evt.title}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-text-muted">{evt.artist}</p>
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="flex-1 mr-3 h-1.5 overflow-hidden rounded-full bg-surface-sunk">
+                      <div
+                        className="h-full rounded-full bg-stage-green"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="font-mono text-[11px] text-text-muted shrink-0">{pct}%</span>
+                  </div>
+                  <p className="mt-1.5 font-mono text-[11px] text-text-muted">
+                    {formatEventDate(evt.date).split(',')[0]}
+                  </p>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
