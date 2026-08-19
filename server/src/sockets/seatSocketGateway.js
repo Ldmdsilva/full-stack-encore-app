@@ -6,6 +6,11 @@ import { getIO } from '../config/socket.js';
  */
 export function registerSeatSocketGateway(io) {
   io.on('connection', (socket) => {
+    // Authenticated sockets auto-join their own booking-update room (§C7.2)
+    if (socket.user?.id) {
+      socket.join(`user:${socket.user.id}`);
+    }
+
     // Client joins an event's seat room
     socket.on('join:event', ({ eventId }) => {
       if (!eventId) {
@@ -37,7 +42,7 @@ export function registerSeatSocketGateway(io) {
  * Emitted only AFTER database write commits (§C7.2)
  * @param {string} eventId
  * @param {Array<string>} seatIds
- * @param {'available'|'booked'} status
+ * @param {'available'|'held'|'booked'} status
  */
 export function broadcastSeatUpdate(eventId, seatIds, status) {
   try {
@@ -67,6 +72,26 @@ export function broadcastEventCancelled(eventId) {
   } catch (err) {
     if (process.env.NODE_ENV !== 'test') {
       console.warn(`[Socket] Could not broadcast event cancellation: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Notify a single user's connected sockets that one of their bookings
+ * changed status, e.g. `pending` → `confirmed` after a webhook lands (§C7.2)
+ * @param {string} userId
+ * @param {{ id: string, status: string }} booking
+ */
+export function broadcastBookingUpdated(userId, booking) {
+  try {
+    const io = getIO();
+    io.to(`user:${userId}`).emit('booking:updated', {
+      bookingId: booking.id,
+      status: booking.status,
+    });
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn(`[Socket] Could not broadcast booking update: ${err.message}`);
     }
   }
 }

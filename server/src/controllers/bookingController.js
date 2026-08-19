@@ -1,14 +1,29 @@
 import * as bookingService from '../services/bookingService.js';
+import { serializeBooking } from '../serializers/bookingSerializer.js';
 
 export async function createBooking(req, res, next) {
   try {
     const { eventId, seatIds } = req.body;
-    const booking = await bookingService.createBooking({
+    const { booking, clientSecret } = await bookingService.createBooking({
       userId: req.user.id,
+      customerEmail: req.user.email,
       eventId,
       seatIds,
     });
-    return res.status(201).json({ booking });
+    return res.status(201).json({ booking: serializeBooking(booking), clientSecret });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getBookingById(req, res, next) {
+  try {
+    const booking = await bookingService.getBookingById({
+      bookingId: req.params.id,
+      userId: req.user.id,
+      role: req.user.role,
+    });
+    return res.status(200).json({ booking: serializeBooking(booking) });
   } catch (error) {
     next(error);
   }
@@ -21,7 +36,7 @@ export async function cancelBooking(req, res, next) {
       bookingId: req.params.id,
       role: req.user.role,
     });
-    return res.status(200).json({ booking });
+    return res.status(200).json({ booking: serializeBooking(booking) });
   } catch (error) {
     next(error);
   }
@@ -30,7 +45,7 @@ export async function cancelBooking(req, res, next) {
 export async function getMyBookings(req, res, next) {
   try {
     const result = await bookingService.getUserBookings(req.user.id, req.query);
-    return res.status(200).json(result);
+    return res.status(200).json({ ...result, bookings: result.bookings.map(serializeBooking) });
   } catch (error) {
     next(error);
   }
@@ -39,7 +54,7 @@ export async function getMyBookings(req, res, next) {
 export async function getAllBookings(req, res, next) {
   try {
     const result = await bookingService.getAllBookings(req.query);
-    return res.status(200).json(result);
+    return res.status(200).json({ ...result, bookings: result.bookings.map(serializeBooking) });
   } catch (error) {
     next(error);
   }

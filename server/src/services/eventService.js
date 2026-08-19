@@ -3,6 +3,9 @@ import Venue from '../models/Venue.js';
 import Booking from '../models/Booking.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { broadcastEventCancelled } from '../sockets/seatSocketGateway.js';
+import { refundPayment } from './paymentService.js';
+import { notifyEventCancelled } from './notification/notificationService.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Retrieve upcoming events with pagination and filtering (FR-7, FR-9)
@@ -14,6 +17,7 @@ export async function getEvents(queryParams = {}) {
     page = 1,
     limit = 10,
     artist,
+    genre,
     from,
     to,
     venue,
@@ -48,16 +52,19 @@ export async function getEvents(queryParams = {}) {
     filter.artist = { $regex: artist.trim(), $options: 'i' };
   }
 
+  // Genre filter
+  if (genre) {
+    filter.genre = genre.trim();
+  }
+
   // Venue filter
   if (venue) {
     filter.venueRef = venue;
   }
 
-  // Project events without the full seats array for faster listing response
   const [events, total] = await Promise.all([
     Event.find(filter)
-      .select('-seats')
-      .populate('venueRef', 'name address capacity')
+      .populate('venueRef', 'name address city capacity')
       .sort({ date: 1 })
       .skip(skip)
       .limit(limitNum),
@@ -78,23 +85,12 @@ export async function getEvents(queryParams = {}) {
  * @returns {Promise<{ event: object, seats: Array }>}
  */
 export async function getEventById(id) {
-  const event = await Event.findById(id).populate('venueRef', 'name address capacity');
+  const event = await Event.findById(id).populate('venueRef', 'name address city capacity');
   if (!event) {
     throw new AppError('Event not found', 404, 'EVENT_NOT_FOUND');
   }
 
-  return {
-    event: {
-      _id: event._id,
-      title: event.title,
-      artist: event.artist,
-      date: event.date,
-      basePrice: event.basePrice,
-      venueRef: event.venueRef,
-      status: event.status,
-    },
-    seats: event.seats,
-  };
+  return { event, seats: event.seats };
 }
 
 /**
@@ -102,10 +98,10 @@ export async function getEventById(id) {
  * @param {object} eventData
  * @returns {Promise<object>}
  */
-export async function createEvent({ title, artist, date, basePrice, venueRef }) {
-  if (!title || !artist || !date || basePrice === undefined || !venueRef) {
+export async function createEvent({ title, artist, genre, imageUrl, description, date, basePrice, venueRef }) {
+  if (!title || !artist || !genre || !date || basePrice === undefined || !venueRef) {
     throw new AppError(
-      'Title, artist, date, basePrice, and venueRef are required',
+      'Title, artist, genre, date, basePrice, and venueRef are required',
       400,
       'VALIDATION_ERROR'
     );
@@ -140,6 +136,9 @@ export async function createEvent({ title, artist, date, basePrice, venueRef }) 
   const event = await Event.create({
     title: title.trim(),
     artist: artist.trim(),
+    genre: genre.trim(),
+    imageUrl: imageUrl?.trim(),
+    description: description?.trim(),
     date: eventDate,
     basePrice: Number(basePrice),
     venueRef: venue._id,
@@ -147,7 +146,7 @@ export async function createEvent({ title, artist, date, basePrice, venueRef }) 
     status: 'scheduled',
   });
 
-  return event;
+  return Event.findById(event._id).populate('venueRef', 'name address city capacity');
 }
 
 /**
@@ -172,7 +171,7 @@ export async function updateEvent(id, updateData) {
   const event = await Event.findByIdAndUpdate(id, safeUpdates, {
     returnDocument: 'after',
     runValidators: true,
-  }).populate('venueRef', 'name address capacity');
+  }).populate('venueRef', 'name address city capacity');
 
   if (!event) {
     throw new AppError('Event not found', 404, 'EVENT_NOT_FOUND');
@@ -186,17 +185,40 @@ export async function updateEvent(id, updateData) {
  * @param {string} id
  */
 export async function deleteEvent(id) {
-  const event = await Event.findById(id);
+  const event = await Event.findById(id).populate('venueRef', 'name city');
   if (!event) {
     throw new AppError('Event not found', 404, 'EVENT_NOT_FOUND');
   }
 
+  // Refund every confirmed booking, then notify its customer (FR-29)
+  const confirmedBookings = await Booking.find({ eventRef: id, status: 'confirmed' }).populate('userRef');
+
+  for (const booking of confirmedBookings) {
+    if (booking.payment?.paymentIntentId) {
+      try {
+        const refund = await refundPayment(booking.payment.paymentIntentId);
+        booking.payment.refundId = refund.id;
+      } catch (error) {
+        logger.error({ err: error, reference: booking.reference }, '[EventService] Refund failed during event cancellation');
+      }
+    }
+    booking.status = 'cancelled';
+    await booking.save();
+
+    if (booking.userRef) {
+      notifyEventCancelled({ user: booking.userRef, booking, event });
+    }
+  }
+
+  // Cancel any remaining pending (unpaid, held) bookings without a refund
+  await Booking.updateMany(
+    { eventRef: id, status: 'pending' },
+    { $set: { status: 'cancelled' }, $unset: { holdExpiresAt: '' } }
+  );
+
   // Mark event as cancelled
   event.status = 'cancelled';
   await event.save();
-
-  // Mark associated bookings as cancelled
-  await Booking.updateMany({ eventRef: id }, { status: 'cancelled' });
 
   // Broadcast cancellation via WebSocket
   broadcastEventCancelled(id);

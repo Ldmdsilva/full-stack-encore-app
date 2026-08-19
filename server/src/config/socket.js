@@ -1,3 +1,4 @@
+import { env } from './env.js';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 
@@ -11,7 +12,7 @@ let io = null;
 export function initSocket(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.CORS_ORIGIN || '*',
+      origin: env.CORS_ORIGIN,
       methods: ['GET', 'POST'],
       credentials: true,
     },

@@ -1,14 +1,12 @@
+import { env } from './config/env.js';
 import http from 'http';
-import dotenv from 'dotenv';
 import app from './app.js';
 import { connectDB, disconnectDB } from './config/db.js';
 import { initSocket } from './config/socket.js';
 import { registerSeatSocketGateway } from './sockets/seatSocketGateway.js';
+import { startHoldReaper, stopHoldReaper } from './jobs/holdReaper.js';
 
-// Load environment variables
-dotenv.config();
-
-const PORT = process.env.PORT || 5000;
+const PORT = env.PORT;
 
 async function startServer() {
   try {
@@ -24,15 +22,19 @@ async function startServer() {
     // 4. Register WebSocket seat gateway (§C7.2)
     registerSeatSocketGateway(io);
 
-    // 5. Start listening for HTTP & WebSocket connections
+    // 5. Start the seat-hold reaper (ADR-009)
+    startHoldReaper();
+
+    // 6. Start listening for HTTP & WebSocket connections
     httpServer.listen(PORT, () => {
-      console.log(`[Server] Encore API running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+      console.log(`[Server] Encore API running in ${env.NODE_ENV} mode on port ${PORT}`);
       console.log(`[Server] Healthcheck available at: http://localhost:${PORT}/api/health`);
     });
 
     // Graceful shutdown handling
     const handleShutdown = async (signal) => {
       console.log(`\n[Server] ${signal} signal received. Closing HTTP server and database connections...`);
+      stopHoldReaper();
       httpServer.close(async () => {
         await disconnectDB();
         console.log('[Server] Graceful shutdown completed.');

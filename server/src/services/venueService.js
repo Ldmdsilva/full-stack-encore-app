@@ -32,9 +32,9 @@ export async function getVenueById(id) {
  * @param {Array} venueData.seatLayout
  * @returns {Promise<object>}
  */
-export async function createVenue({ name, address, seatLayout }) {
-  if (!name || !address || !seatLayout) {
-    throw new AppError('Name, address, and seatLayout are required', 400, 'VALIDATION_ERROR');
+export async function createVenue({ name, address, city, seatLayout }) {
+  if (!name || !address || !city || !seatLayout) {
+    throw new AppError('Name, address, city, and seatLayout are required', 400, 'VALIDATION_ERROR');
   }
 
   if (!Array.isArray(seatLayout) || seatLayout.length === 0) {
@@ -48,6 +48,7 @@ export async function createVenue({ name, address, seatLayout }) {
   const venue = await Venue.create({
     name: name.trim(),
     address: address.trim(),
+    city: city.trim(),
     seatLayout,
     capacity: seatLayout.length,
   });

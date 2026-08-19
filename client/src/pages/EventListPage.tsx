@@ -1,19 +1,30 @@
 import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, X } from 'lucide-react'
+import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Input, Select } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { EventCard } from '@/components/EventCard'
-import { EVENTS, VENUES, GENRES } from '@/lib/mockData'
+import { useAsync } from '@/hooks/useAsync'
+import * as eventsApi from '@/lib/api/events'
+import * as venuesApi from '@/lib/api/venues'
+
+const PAGE_SIZE = 9
+
+// A fixed genre list keeps the filter usable even before the first page of
+// events has loaded — the server's `genre` field is free text, so this is a
+// curated set of the genres the seed data uses rather than an enum.
+const GENRES = ['Folk', 'Soul', 'Contemporary', 'Synth-pop', 'Choral', 'Post-rock']
 
 export function EventListPage() {
   const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''
   const venue = params.get('venue') ?? ''
   const genre = params.get('genre') ?? ''
-
   const from = params.get('from') ?? ''
   const to = params.get('to') ?? ''
+  const page = Number(params.get('page') ?? '1')
 
   const [search, setSearch] = React.useState(q)
 
@@ -25,40 +36,59 @@ export function EventListPage() {
           const next = new URLSearchParams(prev)
           if (search) next.set('q', search)
           else next.delete('q')
+          next.delete('page')
           return next
         },
         { replace: true },
       )
     }, 300)
     return () => clearTimeout(t)
-  }, [search, setParams])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when the debounced text changes
+  }, [search])
 
   const setParam = (key: string, value: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       if (value) next.set(key, value)
       else next.delete(key)
+      next.delete('page')
       return next
     })
   }
 
-  const filtered = EVENTS.filter((e) => {
-    const matchQ =
-      !q ||
-      `${e.artist} ${e.title}`.toLowerCase().includes(q.toLowerCase())
-    const matchVenue = !venue || e.venue.id === venue
-    const matchGenre = !genre || e.genre === genre
-    const eventDate = new Date(e.date)
-    const matchFrom = !from || eventDate >= new Date(from)
-    const matchTo = !to || eventDate <= new Date(to + 'T23:59:59')
-    return matchQ && matchVenue && matchGenre && matchFrom && matchTo
-  })
+  const setPage = (nextPage: number) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (nextPage > 1) next.set('page', String(nextPage))
+      else next.delete('page')
+      return next
+    })
+  }
+
+  const { status, data, error, retry } = useAsync(
+    () =>
+      eventsApi.list({
+        page,
+        limit: PAGE_SIZE,
+        artist: q || undefined,
+        genre: genre || undefined,
+        from: from || undefined,
+        to: to || undefined,
+        venue: venue || undefined,
+      }),
+    [q, venue, genre, from, to, page],
+    { isEmpty: (d) => d.events.length === 0 },
+  )
 
   const hasFilters = q || venue || genre || from || to
   const clear = () => {
     setSearch('')
     setParams({}, { replace: true })
   }
+
+  const venuesState = useAsync(() => venuesApi.list(), [])
+  const venueOptions =
+    venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
 
   return (
     <>
@@ -98,7 +128,7 @@ export function EventListPage() {
             className="md:w-48"
           >
             <option value="">All venues</option>
-            {VENUES.map((v) => (
+            {venueOptions.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
               </option>
@@ -144,12 +174,18 @@ export function EventListPage() {
       <section className="mx-auto max-w-6xl px-5 py-10">
         <div className="mb-6 flex items-baseline justify-between">
           <h2 className="text-[22px] font-medium">Upcoming concerts</h2>
-          <p className="font-mono text-[13px] text-text-muted">
-            {filtered.length} {filtered.length === 1 ? 'show' : 'shows'}
-          </p>
+          {(status === 'success' || status === 'empty') && (
+            <p className="font-mono text-[13px] text-text-muted">
+              {data.total} {data.total === 1 ? 'show' : 'shows'}
+            </p>
+          )}
         </div>
 
-        {filtered.length === 0 ? (
+        {status === 'loading' && <Spinner label="Loading concerts…" />}
+
+        {status === 'error' && <ErrorState description={error.message} onRetry={retry} />}
+
+        {status === 'empty' && (
           <div className="rounded-[var(--radius-card)] border-[0.5px] border-dashed border-border-strong px-6 py-16 text-center">
             <h3 className="font-voice text-[24px] font-medium">
               No concerts match your search
@@ -162,12 +198,42 @@ export function EventListPage() {
               Clear filters
             </Button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((e) => (
-              <EventCard key={e.id} event={e} />
-            ))}
-          </div>
+        )}
+
+        {status === 'success' && (
+          <>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {data.events.map((e) => (
+                <EventCard key={e.id} event={e} />
+              ))}
+            </div>
+
+            {data.totalPages > 1 && (
+              <div className="mt-10 flex items-center justify-center gap-4">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={data.page <= 1}
+                  onClick={() => setPage(data.page - 1)}
+                >
+                  <ChevronLeft className="size-4" />
+                  Previous
+                </Button>
+                <span className="font-mono text-[13px] text-text-muted">
+                  Page {data.page} of {data.totalPages}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={data.page >= data.totalPages}
+                  onClick={() => setPage(data.page + 1)}
+                >
+                  Next
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </section>
     </>

@@ -1,9 +1,10 @@
 import * as venueService from '../services/venueService.js';
+import { serializeVenue } from '../serializers/venueSerializer.js';
 
 export async function getAllVenues(req, res, next) {
   try {
     const venues = await venueService.getAllVenues();
-    return res.status(200).json({ venues });
+    return res.status(200).json({ venues: venues.map(serializeVenue) });
   } catch (error) {
     next(error);
   }
@@ -12,7 +13,7 @@ export async function getAllVenues(req, res, next) {
 export async function getVenueById(req, res, next) {
   try {
     const venue = await venueService.getVenueById(req.params.id);
-    return res.status(200).json({ venue });
+    return res.status(200).json({ venue: serializeVenue(venue) });
   } catch (error) {
     next(error);
   }
@@ -20,9 +21,9 @@ export async function getVenueById(req, res, next) {
 
 export async function createVenue(req, res, next) {
   try {
-    const { name, address, seatLayout } = req.body;
-    const venue = await venueService.createVenue({ name, address, seatLayout });
-    return res.status(201).json({ venue });
+    const { name, address, city, seatLayout } = req.body;
+    const venue = await venueService.createVenue({ name, address, city, seatLayout });
+    return res.status(201).json({ venue: serializeVenue(venue) });
   } catch (error) {
     next(error);
   }
@@ -31,7 +32,7 @@ export async function createVenue(req, res, next) {
 export async function updateVenue(req, res, next) {
   try {
     const venue = await venueService.updateVenue(req.params.id, req.body);
-    return res.status(200).json({ venue });
+    return res.status(200).json({ venue: serializeVenue(venue) });
   } catch (error) {
     next(error);
   }

@@ -1,8 +1,15 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
 import User from '../models/User.js';
 import Booking from '../models/Booking.js';
+import Event from '../models/Event.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { normaliseLk } from '../utils/phone.js';
+import { notifyWelcome } from './notification/notificationService.js';
+import { refundPayment } from './paymentService.js';
+import { broadcastSeatUpdate } from '../sockets/seatSocketGateway.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Generate signed JWT token
@@ -29,16 +36,24 @@ export function generateToken(user) {
  * @param {string} params.name
  * @param {string} params.email
  * @param {string} params.password
+ * @param {string} params.phone
  * @returns {Promise<{ user: object, token: string }>}
  */
-export async function register({ name, email, password }) {
-  if (!name || !email || !password) {
-    throw new AppError('Name, email, and password are required', 400, 'VALIDATION_ERROR');
+export async function register({ name, email, password, phone }) {
+  if (!name || !email || !password || !phone) {
+    throw new AppError('Name, email, password, and phone are required', 400, 'VALIDATION_ERROR');
   }
 
   if (password.length < 6) {
     throw new AppError('Password must be at least 6 characters long', 400, 'VALIDATION_ERROR', {
       field: 'password',
+    });
+  }
+
+  const normalizedPhone = normaliseLk(phone);
+  if (!normalizedPhone) {
+    throw new AppError('Phone must be a valid Sri Lankan mobile number', 400, 'VALIDATION_ERROR', {
+      field: 'phone',
     });
   }
 
@@ -58,15 +73,15 @@ export async function register({ name, email, password }) {
     name: name.trim(),
     email: normalizedEmail,
     passwordHash,
+    phone: normalizedPhone,
     role: 'customer',
   });
 
   const token = generateToken(user);
 
-  return {
-    user: user.toJSON(),
-    token,
-  };
+  notifyWelcome(user);
+
+  return { user, token };
 }
 
 /**
@@ -96,10 +111,7 @@ export async function login({ email, password }) {
 
   const token = generateToken(user);
 
-  return {
-    user: user.toJSON(),
-    token,
-  };
+  return { user, token };
 }
 
 /**
@@ -112,7 +124,7 @@ export async function getUserProfile(userId) {
   if (!user) {
     throw new AppError('User not found', 404, 'USER_NOT_FOUND');
   }
-  return user.toJSON();
+  return user;
 }
 
 /**
@@ -121,9 +133,10 @@ export async function getUserProfile(userId) {
  * @param {object} updates
  * @param {string} [updates.name]
  * @param {string} [updates.email]
+ * @param {string} [updates.phone]
  * @returns {Promise<object>}
  */
-export async function updateUserProfile(userId, { name, email }) {
+export async function updateUserProfile(userId, { name, email, phone }) {
   const updates = {};
   if (name) updates.name = name.trim();
   if (email) {
@@ -133,6 +146,15 @@ export async function updateUserProfile(userId, { name, email }) {
       throw new AppError('Email is already in use by another account', 409, 'DUPLICATE_EMAIL');
     }
     updates.email = normalizedEmail;
+  }
+  if (phone) {
+    const normalizedPhone = normaliseLk(phone);
+    if (!normalizedPhone) {
+      throw new AppError('Phone must be a valid Sri Lankan mobile number', 400, 'VALIDATION_ERROR', {
+        field: 'phone',
+      });
+    }
+    updates.phone = normalizedPhone;
   }
 
   const user = await User.findByIdAndUpdate(userId, updates, {
@@ -144,19 +166,49 @@ export async function updateUserProfile(userId, { name, email }) {
     throw new AppError('User not found', 404, 'USER_NOT_FOUND');
   }
 
-  return user.toJSON();
+  return user;
 }
 
 /**
- * Delete user account and anonymize existing bookings (FR-6)
+ * Delete a user account (FR-6). Releases seats and refunds any confirmed
+ * bookings, then anonymises the account in place rather than hard-deleting
+ * it — a hard delete would leave existing bookings' `userRef` dangling.
  * @param {string} userId
  */
 export async function deleteUserAccount(userId) {
-  const user = await User.findByIdAndDelete(userId);
+  const user = await User.findById(userId);
   if (!user) {
     throw new AppError('User not found', 404, 'USER_NOT_FOUND');
   }
 
-  // Anonymize user reference on existing bookings
-  await Booking.updateMany({ userRef: userId }, { status: 'cancelled' });
+  const activeBookings = await Booking.find({ userRef: userId, status: { $in: ['pending', 'confirmed'] } });
+
+  for (const booking of activeBookings) {
+    if (booking.status === 'confirmed' && booking.payment?.paymentIntentId) {
+      try {
+        const refund = await refundPayment(booking.payment.paymentIntentId);
+        booking.payment.refundId = refund.id;
+      } catch (error) {
+        logger.error({ err: error, reference: booking.reference }, '[AuthService] Refund failed during account deletion');
+      }
+    }
+
+    const seatIds = booking.seats.map((seat) => seat.id);
+    await Event.updateOne(
+      { _id: booking.eventRef },
+      { $set: { 'seats.$[elem].status': 'available' } },
+      { arrayFilters: [{ 'elem.id': { $in: seatIds } }] }
+    );
+    broadcastSeatUpdate(booking.eventRef.toString(), seatIds, 'available');
+
+    booking.status = 'cancelled';
+    booking.holdExpiresAt = undefined;
+    await booking.save();
+  }
+
+  user.name = 'Deleted user';
+  user.email = `deleted-${user._id}@encore.invalid`;
+  user.phone = '94100000000';
+  user.passwordHash = await bcrypt.hash(randomUUID(), 10);
+  await user.save();
 }

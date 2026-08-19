@@ -15,7 +15,7 @@
 
 | Field | Detail |
 |---|---|
-| Status | Baselined for development |
+| Status | Baselined for development — amended at v2.3 (see revision history) to bring real payment and notifications into scope; ADR-009 records this as a deliberate evolution of the baseline, not scope drift |
 | Repository | [GitHub Classroom link — insert] |
 | Related documents | Encore Design System v1.0 |
 | Review cycle | Updated at each sprint boundary |
@@ -29,11 +29,12 @@
 | 2.0 | [date] | [you] | Added ADRs, API contracts, data flow, scale estimates, error handling, expanded test strategy |
 | 2.1 | [date] | [you] | Switched persistence to MongoDB Atlas (ADR-007); updated deployment topology, secrets handling, and test environments |
 | 2.2 | [date] | [you] | Fixed language split — TypeScript client, JavaScript server (ADR-008); added type-check to pipeline and contract-verification strategy |
+| 2.3 | [date] | [you] | Amended the baseline to bring real payment (Stripe hold-then-pay), email (nodemailer), and SMS (notify.lk) notifications into scope, superseding the §A4.2 exclusions and the FR-21 "simulated payment" requirement. Added ADR-009 to ADR-012, FR-26 to FR-29, and updated §C6, §C7, §C8/C9, and §D6 to match the implemented system. This is a deliberate, documented evolution of the baseline — ADR-004's own "revisit when" trigger firing — not scope drift; see ADR-009. |
 
 **Contents**
 
 - **Part A — Project Initiation Document** (§A1–A12)
-- **Part B — Architecture Decision Records** (ADR-001 to ADR-008)
+- **Part B — Architecture Decision Records** (ADR-001 to ADR-012)
 - **Part C — Software Requirements Specification** (§C1–C10)
 - **Part D — Test Strategy and Plan** (§D1–D8)
 - **Appendix** — coursework requirement checklist
@@ -83,16 +84,18 @@ These map directly to the assessment rubric categories: Analysis, Design, Softwa
 - WebSocket (Socket.IO) channel broadcasting live seat state.
 - JWT-based registration, login, and route protection with role-based access (customer/admin).
 - CRUD for Event, Booking, User, and Venue.
+- Real payment processing via Stripe Checkout Sessions with the embedded Payment Element (ADR-010), on a hold-then-pay booking flow (ADR-009).
+- Transactional email (nodemailer) and SMS (notify.lk) notifications for booking and account events (ADR-012).
 - Automated test suites and a CI/CD pipeline.
 - Containerised deployment (client, server, database).
 
 ### A4.2 Out of scope
 
-- Real payment processing (a mocked/simulated payment step is used; no live card handling — this also keeps the project clear of handling real financial credentials).
 - Native mobile apps.
-- Email/SMS delivery infrastructure (booking confirmation is shown in-app).
-- Horizontal scaling of the WebSocket layer across multiple server instances (single-instance only; see ADR-003 consequences).
+- Horizontal scaling of the WebSocket layer across multiple server instances: no Redis adapter is used, so a second API instance would not receive broadcasts targeting sockets already connected to the first (single-instance only; see ADR-003 consequences).
 - Third-party integrations beyond those needed to satisfy the brief.
+
+**Amendment note (v2.3):** real payment processing and email/SMS delivery were originally listed here as out of scope, with FR-21 specifying a *simulated* payment. Introducing the hold-then-pay flow (ADR-009) moved both into scope; see the revision history and ADR-009 to ADR-012. This is recorded as a deliberate, documented evolution of the baseline, not scope drift.
 
 ### A4.3 Assumptions and constraints
 
@@ -165,6 +168,25 @@ Encore uses a **modular monolith** on the server (a single deployable Node.js pr
                                           └─────────────────────────────┘
 ```
 
+**External service dependencies (v2.3 amendment, ADR-009 to ADR-012):** the Services layer also reaches three third-party HTTPS endpoints, each outbound-only and each explicitly best-effort — a failure in any of them degrades gracefully rather than failing the triggering request (notifications, ADR-012) or is resolved asynchronously by the reaper/webhook rather than the request thread (Stripe):
+
+```
+        ┌────────────────────────────────────────────────────────────┐
+        │         Node.js / Express API container (Services)          │
+        └───────────────────────────┬───────────────────────────────┘
+                                     │ HTTPS (outbound; Stripe also calls
+                                     │ back in via the signed webhook)
+                    ┌────────────────┼─────────────────┐
+                    │                │                  │
+             ┌──────▼───────┐ ┌──────▼───────┐  ┌───────▼───────┐
+             │    Stripe    │ │ SMTP provider │  │   notify.lk   │
+             │  (Checkout   │ │ (nodemailer;  │  │  (SMS REST    │
+             │  Sessions +  │ │  Ethereal in  │  │  API, called  │
+             │  signed      │ │  dev if       │  │  via global   │
+             │  webhooks)   │ │  unconfigured)│  │  `fetch`)     │
+             └──────────────┘ └───────────────┘  └───────────────┘
+```
+
 **Deployment topology:** two locally orchestrated containers (client, API) via `docker-compose`, plus a managed MongoDB Atlas replica set hosted externally. The system therefore runs across three independently hosted tiers on separate machines — comfortably satisfying the brief's requirement that the system be distributed and capable of running on multiple computers. Atlas is itself a multi-node replica set, so the data tier is distributed in its own right.
 
 The connection string is **never** hard-coded or committed; it is supplied to the API container through the `MONGODB_URI` environment variable (see §A6.4).
@@ -223,6 +245,8 @@ This matters beyond good practice: the repository link is submitted for marking 
 ```
 
 Step 6 is the concurrency control point and is the reason no double-booking can occur — see **ADR-004**.
+
+**Amendment note (v2.3, ADR-009):** step 6 now targets `held` rather than `booked` — the matcher and update mechanism are otherwise unchanged. Step 10 returns `{booking, clientSecret}` with the booking `pending`, not a final confirmation: a Stripe Checkout Session is opened after step 7b, and the client pays against `clientSecret` via the embedded Payment Element. The booking only reaches `confirmed` (seats `held → booked`) when the Stripe webhook in §C7.1 is received and verified — never as a direct result of this request. See ADR-009 to ADR-011 for the full sequence.
 
 ## A7. Load estimation and scale
 
@@ -288,19 +312,21 @@ Proportionate to scale, but present — absence of any operational thinking is a
 - **Structured logging:** JSON logs with request id, user id, route, status, and duration.
 - **Health endpoint:** `GET /api/health` reports API status and MongoDB connectivity; used as the Docker healthcheck.
 - **Error tracking:** all unhandled errors funnel through a single Express error middleware that logs with stack and returns a safe client message.
-- **Key signals to watch:** 5xx rate, booking-conflict (409) rate, WebSocket connection count, p95 booking latency.
+- **Key signals to watch:** 5xx rate, booking-conflict (409) rate, WebSocket connection count, p95 booking latency, hold-reaper sweep count (a sustained non-zero count indicates checkout abandonment or a struggling payment step, per ADR-009's named risk).
 - **Atlas-side observability:** the provider dashboard supplies connection counts, slow-query logs, and storage usage at no implementation cost — used to verify the §C6.3 indexes are actually being hit.
+- **Third-party dependency observability (v2.3 amendment):** the Stripe Dashboard's Events log and the notify.lk account balance/delivery log supplement application logs for the three external dependencies added by ADR-009/ADR-012; notification failures are logged via `pino` but, by design (ADR-012), never raise an alert-worthy application error.
 
 ## A12. Ethics, security, and academic integrity
 
 - **Ethics:** usability testing follows University ethical guidelines — participant consent, right to withdraw, anonymised results.
-- **Security:** passwords hashed with bcrypt (cost 10+); JWT for session auth with expiry; role-based authorisation enforced server-side; input validation on all endpoints; rate limiting on auth routes; no sensitive data in query strings; no real financial data handled.
+- **Security:** passwords hashed with bcrypt (cost 10+); JWT for session auth with expiry; role-based authorisation enforced server-side; input validation on all endpoints (NFR-4); rate limiting on auth and booking routes; no sensitive data in query strings.
+- **Payment card data (v2.3 amendment, NFR-3):** card details are entered directly into Stripe's embedded Payment Element, which tokenises them client-side inside Stripe's iframe. Card data never transits the Encore server, is never logged, and is never stored — the server only ever sees a Stripe session id, payment intent id, and status. This keeps the server's PCI DSS scope to the minimal SAQ A category, since it never touches, stores, or transmits cardholder data.
 - **Academic integrity:** all work is the developer's own; sources referenced; generative AI used only within the brief's permitted assistive categories.
 
 ---
 # Part B — Architecture Decision Records
 
-Eight decisions material enough to warrant a record. Each states the forces at play, the options genuinely considered, the trade-offs, and what the decision makes harder — not just what it makes easier.
+Twelve decisions material enough to warrant a record — the original eight (ADR-001 to ADR-008), plus four added in the v2.3 amendment (ADR-009 to ADR-012) when real payment and notifications came into scope. Each states the forces at play, the options genuinely considered, the trade-offs, and what the decision makes harder — not just what it makes easier.
 
 ---
 
@@ -674,6 +700,170 @@ The honest cost of this split is the **API boundary seam**: the client declares 
 6. [ ] Configure ESLint separately for each side (`@typescript-eslint` on the client, base config on the server).
 
 ---
+
+## ADR-009: Hold-then-pay supersedes ADR-004's Option A choice
+
+**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole) · **Amends:** ADR-004 (v2.3)
+
+### Context
+ADR-004 chose Option A — an atomic conditional update straight from `available` to `booked` at submission time — over Option C, a pessimistic seat hold with a TTL, explicitly naming its cost: "the losing user learns of the conflict only at submission, not at selection time," and recording as its own trigger: **"Revisit when: on-sale contention becomes high enough that 409s are common — then move to Option C."**
+
+Introducing real payment (v2.3) forces this revisit regardless of measured contention, for a reason ADR-004 did not anticipate: a booking can no longer be "confirmed" the instant seats are claimed, because a real payment has to be collected first, and that takes the user tens of seconds to minutes to complete. Booking straight to `booked` at submission time — as ADR-004 did — would mean charging nothing and calling a seat sold before any money has moved, which is simply wrong once payment is real. Some intermediate state between "seats claimed" and "payment captured" is now unavoidable; that intermediate state is exactly Option C's hold.
+
+### Decision
+Adopt **Option C — pessimistic seat hold with a TTL** for the interval between seat selection and payment. Seats move `available → held` (not `available → booked`) in the same atomic conditional update ADR-004 built; the booking is created `pending` with `holdExpiresAt = now + HOLD_TTL_MINUTES`; a background reaper releases any hold whose TTL lapses unpaid; a Stripe webhook (ADR-011) is the sole path from `pending`/`held` to `confirmed`/`booked`.
+
+### Options considered
+
+**Option A — Extend ADR-004's Option A: mark `booked` at submission, refund if payment fails**
+
+**Pros:** no new hold lifecycle, no reaper.
+**Cons:** a seat reads as sold to every other viewer while the payer may still abandon or fail to pay; "booked" would stop meaning what the rest of the system assumes it means; a failed payment then needs its own seat-release path anyway, which is most of Option C's complexity acquired without any of its honesty benefit. Rejected.
+
+**Option B — Keep Option A exactly, defer payment to a separate step with no hold**
+
+**Pros:** simplest possible change.
+**Cons:** two customers could both be told their submission "succeeded" and then compete for the same seat during payment, reintroducing exactly the race ADR-004 exists to prevent, one layer up. Rejected as incorrect for the same reason ADR-004 rejected read-then-write.
+
+**Option C — Pessimistic seat hold with TTL (chosen)** — as scoped by ADR-004 at the time it was written.
+
+### Trade-off analysis
+ADR-004 was explicit that Option C's cost is a hold lifecycle: TTL expiry handling, cleanup for abandoned checkouts, and the possibility of seats stranded in a held state after a crash. All three costs are real and are paid here: the reaper (`server/src/jobs/holdReaper.js`) is a second background process that must not die silently, or its failure mode is seats stuck in `held` forever with no automatic recovery — this is now the system's single largest new operational surface, and is watched via the monitoring signal added in §A11. The added Stripe dependency (ADR-010) is a second new operational and credential-management burden.
+
+Against that: **the atomic conditional seat-update mechanism itself is unchanged.** The `$all`/`$elemMatch`-guarded `updateOne` that ADR-004 built and the concurrency test (D4.3) exercises still runs exactly as before — it now targets `held` instead of `booked`, and nothing else about it moved. The concurrency guarantee this codebase is proudest of, and the one requirement (O7) that fails the whole project if it breaks, survives this change completely intact. What changed is only what the successful terminal state of that update is called, and what has to happen after it before a booking is final.
+
+### Consequences
+- **Easier:** the system now has an honest state for "seats claimed, payment in flight," which real payment requires; other viewers see a seat grey out the moment a checkout starts rather than only once it is paid, narrowing the residual 409 window ADR-004 accepted as a cost.
+- **Harder:** a hold lifecycle now exists and must be correct — TTL computation, reaper cadence, and the guarded conditional updates that stop the reaper and the webhook from racing each other over the same booking (`findOneAndUpdate({_id, status: 'pending'}, ...)` on every transition). A dead reaper process is a new, silent failure mode with no user-facing symptom until support tickets arrive asking why a seat "shows available but won't book."
+- **Revisit when:** the reaper's 60-second polling cadence proves too coarse for demo purposes (a shorter `HOLD_TTL_MINUTES` in a live demo could expire mid-narration), or a future move to a message-queue-driven expiry (rather than polling) is warranted by scale.
+
+### Action items
+1. [ ] Alert on the hold-reaper process being unreachable/not running (§A11).
+2. [ ] Confirm every state transition off `pending` uses a guarded conditional update, never an unconditional `save()`.
+3. [ ] Document `HOLD_TTL_MINUTES` and the "why is my booking stuck pending" failure mode in the README (missing `STRIPE_WEBHOOK_SECRET` in local dev is the most likely cause).
+
+---
+
+## ADR-010: Stripe Checkout Sessions with the embedded Payment Element
+
+**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+
+### Context
+ADR-009 requires *some* mechanism to collect a real card payment against a `pending` booking's hold. Stripe offers several integration surfaces for this: hosted Checkout (a full-page redirect to a Stripe-branded payment page), raw Payment Intents with a hand-built card form, and Checkout Sessions created in `ui_mode: 'elements'` with the embedded Payment Element rendered inline.
+
+### Decision
+Use a **Stripe Checkout Session created with `ui_mode: 'elements'`**, rendering Stripe's **Payment Element** inline inside the existing checkout page, rather than redirecting to Stripe's hosted page.
+
+### Options considered
+
+**Option A — Hosted Checkout (full-page redirect)**
+
+**Pros:** the least client code of any option — Stripe owns the entire payment page; PCI scope is trivially minimal.
+**Cons:** the browser navigates away from `encore.live` to a Stripe-branded page and back, breaking the ticket-stub visual identity (Encore Design System v1.0) for the one screen that most needs to feel trustworthy and on-brand; the countdown-on-hold UX (FR-26) and the live seat-map "greyed out" feedback are awkward to preserve across a full navigation. Rejected on design-continuity grounds.
+
+**Option B — Raw Payment Intents + a hand-built card form**
+
+**Pros:** maximum control over every pixel of the payment UI.
+**Cons:** substantially more client code for equivalent security and UX — manual `stripe.confirmCardPayment` wiring, manual error-state handling for every card decline code, and a hand-rolled card element instead of Stripe's maintained one. Stripe's own current guidance for exactly this shape of integration (single-page checkout, one product, no saved payment methods needed) is to use a Checkout Session with the embedded Payment Element, not raw Payment Intents. Rejected as more code for no material gain.
+
+**Option C — Embedded Checkout Session with the Payment Element (chosen)**
+
+**Pros:** the Payment Element renders inside the existing checkout page — no redirect, so the ticket-stub design and hold countdown stay on-screen throughout; Stripe maintains the card element, its validation, and its localisation; a single `clientSecret` from `POST /api/bookings` (or the re-issue endpoint) is all the client needs; card data is tokenised entirely inside Stripe's iframe, so it never reaches the Encore server (§A12, NFR-3).
+**Cons:** slightly less visual control than a fully hand-built form (the Payment Element's internal layout is Stripe's, though its `appearance` object is themeable from the design tokens); ties the client to `@stripe/stripe-js` / `@stripe/react-stripe-js`.
+
+### Trade-off analysis
+Design continuity and reduced client code both point the same direction. Hosted Checkout is rejected specifically because this project is assessed partly on UI/UX polish, and a redirect away from the app for the single highest-stakes screen is a real regression. Raw Payment Intents is rejected because it reproduces work Stripe already provides, for a use case Stripe's own documentation says the embedded Payment Element is designed for.
+
+### Consequences
+- **Easier:** payment UI stays inside the Encore visual language; less client payment code to test and maintain; PCI scope stays at SAQ A.
+- **Harder:** the client now depends on two Stripe packages and their `appearance` theming API rather than owning the form outright; local development requires a Stripe test-mode account and the Stripe CLI for webhook forwarding (README).
+- **Revisit when:** a payment method requiring a genuine full-page redirect (e.g. certain bank-redirect methods) is added — Checkout Sessions support this without a rewrite, so no revisit is currently anticipated for the card-only scope in play here.
+
+### Action items
+1. [ ] Build `client/src/components/payments/StripeCheckoutForm.tsx` around `loadStripe` + the embedded Payment Element.
+2. [ ] Theme the Element's `appearance` object from the design tokens in `client/src/index.css`, not Stripe's defaults.
+3. [ ] Show a live hold countdown from `holdExpiresAt`, and route back to the event with a clear message when it reaches zero.
+
+---
+
+## ADR-011: Webhook-authoritative confirmation
+
+**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+
+### Context
+Once a card payment completes in the browser, the client's Stripe integration receives a success callback. It is tempting to have that callback call the Encore API to mark the booking confirmed directly. This decision is about whether that client-reported success is ever trusted as the trigger for the authoritative `pending → confirmed` state change.
+
+### Decision
+**Never.** The client's post-payment success callback only navigates to the confirmation page and (optionally) shows an optimistic "confirming…" state. The **only** path that moves a booking `pending → confirmed` and its seats `held → booked` is a **Stripe webhook** — `checkout.session.completed`, with `payment_intent.succeeded` as a belt-and-braces second path — verified by signature and recorded in the `WebhookEvent` idempotency ledger before it is acted on.
+
+### Options considered
+
+**Option A — Trust the client's success callback (rejected)**
+
+**Pros:** the confirmation page could update the instant the browser sees success, with no round trip to Stripe's asynchronous webhook delivery.
+**Cons:** a client is not a trustworthy witness to its own payment. It can lie (a modified request from a browser's dev tools costs nothing to send), crash immediately after payment succeeds but before it reports success, lose the response to a network drop, or have its tab closed by the user mid-redirect. Any of these would either let an unconfirmed booking sit unclaimed forever, or — worse — let a forged "it succeeded" call confirm a booking nobody paid for. Rejected: it moves the system's single most security- and money-sensitive state transition onto the one party in the transaction with both the motive and the means to falsify it.
+
+**Option B — Webhook-authoritative confirmation (chosen)**
+
+**Pros:** Stripe's webhook is delivered by Stripe's own infrastructure, independently of anything the client does after payment; it is cryptographically signed with `STRIPE_WEBHOOK_SECRET`, so a forged delivery is detectable and rejected (400 `INVALID_SIGNATURE`); it fires even if the customer's browser crashes, closes, or loses connectivity immediately after paying, because Stripe retries delivery until it is acknowledged. This makes it the only source of truth the server can actually stand behind.
+**Cons:** confirmation is not instantaneous from the client's point of view — there is a real, if usually sub-second, gap between "Stripe says payment succeeded" in the browser and the webhook landing at `/api/payments/webhook`. The confirmation page has to show an honest "confirming payment…" state for that gap (Phase 5 spec) rather than assuming success immediately.
+
+### Trade-off analysis
+This is not a close call. The client's report about its own payment is unauthenticated with respect to the server (it is just another API call it could make regardless of what actually happened at Stripe), whereas the webhook is a message from Stripe itself, signed with a secret the client never sees. Given that the transition being protected is "did this customer's card actually get charged," only the second is a valid basis for the decision. The small UX cost — a brief "confirming…" state — is worth paying to keep the server's most consequential state change tied to a source it can verify rather than one it can only hope is honest.
+
+**Idempotency (the second half of this decision):** Stripe's delivery guarantee is *at-least-once*, not *exactly-once* — the same event can arrive twice (a retry after a slow 200, a manual resend from the Stripe dashboard, etc.). Processing `checkout.session.completed` twice must not double-apply the confirmation (e.g. re-sending the confirmation email, or worse, re-crediting something). The `WebhookEvent` collection is a unique-indexed ledger keyed on `stripeEventId`: the handler attempts an insert before doing anything else, and a duplicate-key error means "already processed" — the handler returns `200 {received: true}` immediately and does no further work. Every state transition inside the handler is additionally written as a guarded conditional update (`findOneAndUpdate({_id, status: 'pending'}, ...)`), so even if the ledger check were somehow bypassed, a booking that is no longer `pending` simply cannot be re-confirmed.
+
+### Consequences
+- **Easier:** the confirmation decision has exactly one code path and one trust boundary to audit; replay and out-of-order delivery are both verified non-issues by construction rather than by hoping Stripe never retries.
+- **Harder:** the confirmation page must handle an asynchronous, unbounded-in-the-worst-case wait (mitigated by listening for `booking:updated` over the socket and polling every 2s for up to 30s as a fallback); local development requires `stripe listen --forward-to localhost:5000/api/payments/webhook` running, or webhooks never arrive and every booking appears stuck `pending` — a common source of "it looks broken" reports that is actually working as designed (documented in the README's troubleshooting note).
+- **Revisit when:** never, for the payment-confirmation transition specifically — this is a correctness property, not a performance trade-off, and there is no load level at which trusting the client becomes acceptable.
+
+### Action items
+1. [ ] Mount `/api/payments/webhook` with `express.raw()` ahead of `express.json()` so signature verification sees the untouched body.
+2. [ ] Insert into `WebhookEvent` before dispatching on `stripeEvent.type`; treat a duplicate key as success, not an error.
+3. [ ] Write every webhook-driven state transition as a `findOneAndUpdate` guarded on the expected current status.
+4. [ ] Document the `stripe listen` local-development requirement prominently in the README.
+
+---
+
+## ADR-012: Nodemailer + notify.lk REST, over a transactional email API and Twilio, for notifications
+
+**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+
+### Context
+Real payment (ADR-009) creates events worth telling a customer about outside the app: a booking confirmed, a booking cancelled and refunded, an event the customer holds tickets for being cancelled, a payment attempt failing. Two channels are needed — email and SMS (the latter driven by the brief's Sri Lankan user base and the `phone` field now required at registration). For each channel there is a choice between a dedicated transactional provider/SDK and a simpler, more manual integration.
+
+### Decision
+Use **nodemailer** against a plain SMTP transport (Ethereal as a zero-config development fallback) for email, and a direct **notify.lk REST call via Node 22's global `fetch`** for SMS — no email-provider SDK, no SMS-provider SDK, no added HTTP client dependency.
+
+### Options considered
+
+**Option A — nodemailer (SMTP) + notify.lk REST (chosen)**
+
+**Pros:** no proprietary SDK lock-in — nodemailer speaks plain SMTP, so any provider (Gmail app password, Mailtrap, a university SMTP relay) works without code changes, and Ethereal (`nodemailer.createTestAccount()`) gives a working demo with zero setup and a preview URL logged to the console; notify.lk's REST API is four form fields over `fetch`, needing no dependency at all; both fit an 80-hour solo budget without a new account-provisioning dependency beyond what §A9's plan already assumes.
+**Cons:** SMTP and a notify.lk account balance are now genuine operational dependencies the team (in this case, the solo developer) must keep funded and configured — a dead SMTP host or an empty notify.lk balance silently stops one channel; no built-in delivery-analytics dashboard beyond what each provider offers directly.
+
+**Option B — A transactional email API (e.g. SendGrid, Postmark, Resend) + Twilio for SMS**
+
+**Pros:** richer deliverability tooling, dashboards, and delivery webhooks out of the box; Twilio is the de facto standard for programmable SMS with mature client libraries.
+**Cons:** two more third-party accounts and API keys to provision and protect (on top of Stripe, ADR-010), each with its own SDK to learn; Twilio in particular is priced and geographically routed in a way that does not naturally suit Sri Lankan mobile numbers as well as a Sri Lanka-specific provider (notify.lk) does; the added SDK surface (two more `npm` dependencies with their own transitive trees) buys deliverability guarantees this coursework-scale system does not need to demonstrate. Rejected as more operational and dependency surface for a requirement that a plain SMTP transport and a four-field REST call already satisfy.
+
+### Trade-off analysis
+The decisive factor is the same one that shaped ADR-006 (no caching layer): don't add infrastructure a requirement doesn't actually need. Nodemailer's provider-agnosticism is a direct asset here — Ethereal's zero-setup fallback means a marker running the system for the first time gets a working notification demo (a preview URL in the server log) without provisioning anything, which a transactional-API option would not offer as cheaply. notify.lk is the natural fit for the Sri Lankan phone numbers this system's `phone` field is normalised around, and its REST shape is simple enough that a dependency (Twilio's SDK) buys nothing a native `fetch` call doesn't already provide.
+
+**The trade-off is honestly an operational one, not a technical one:** SMTP credentials and a notify.lk account balance are two new things that can silently run out or misconfigure, and unlike Stripe's near-100%-uptime API, a personal/free-tier SMTP relay or a low notify.lk balance is a realistic failure mode during development or a live demo. This is why the companion architectural decision matters as much as the provider choice: **notifications are explicitly best-effort and architecturally cannot block or fail a booking.** `notificationService`'s every exported function wraps its work in a `safely()` helper that catches and logs rather than propagates (`server/src/services/notification/notificationService.js`), so a dead SMTP host or an empty notify.lk balance degrades to "no email/SMS sent, logged as a warning" rather than "the booking failed" — the cost of the operational dependency is capped at "a notification didn't arrive," never "the transaction didn't complete."
+
+### Consequences
+- **Easier:** zero-config development (Ethereal) and a simple, swappable SMTP target in production; no SMS SDK to learn; fewer third-party accounts than Option B; the fire-and-forget design means a notification-channel outage is never a production incident for the booking flow itself.
+- **Harder:** two more environment-variable groups (`SMTP_*`, `NOTIFYLK_*`) to configure and keep valid; no delivery-webhook feedback loop, so a silently-bounced email or an unaccepted SMS is only visible in logs, not proactively surfaced; notify.lk's `NotifyDEMO` sender is explicitly documented as unsuitable for OTP-style content, a constraint that must be remembered if the message templates are ever extended.
+- **Revisit when:** notification volume or delivery-analytics requirements grow past what log inspection can reasonably support — the migration path is to swap the SMTP transport for a transactional provider's SMTP endpoint (no code change, since nodemailer already speaks SMTP) before reaching for a dedicated SDK.
+
+### Action items
+1. [ ] Document `SMTP_*` and `NOTIFYLK_*` variables in `server/.env.example` with guidance on Ethereal as a no-setup fallback.
+2. [ ] Ensure every `notificationService` export is wrapped so a failure never propagates to the caller.
+3. [ ] Note the notify.lk `NotifyDEMO` OTP-content restriction where SMS templates are authored.
+
+---
 # Part C — Software Requirements Specification
 
 *Structured to IEEE-830 conventions.*
@@ -694,8 +884,9 @@ As defined in §A4. Encore is a distributed booking system: a React client, a No
 | JWT | JSON Web Token |
 | UAT | User Acceptance Testing |
 | Actor | A user type interacting with the system |
-| Seat state | One of `available`, `booked` |
-| Room | A Socket.IO channel scoped to one event |
+| Seat state | One of `available`, `held`, `booked` (v2.3: `held` added by ADR-009) |
+| Hold | A time-boxed reservation (`pending` booking + `held` seats) that lapses to `available`/`expired` if unpaid within `HOLD_TTL_MINUTES` (ADR-009) |
+| Room | A Socket.IO channel scoped to one event, or to one user's own bookings (`user:<id>`, v2.3) |
 | TOCTOU | Time-of-check-to-time-of-use (a class of race condition) |
 
 ### C1.4 References
@@ -766,7 +957,11 @@ Prioritised with **MoSCoW** (M = Must, S = Should, C = Could). Each requirement 
 | FR-18 | M | A customer can view their own bookings | Returns only the authenticated user's bookings |
 | FR-19 | S | A customer can cancel their booking | Booking status becomes cancelled; seats return to available and broadcast |
 | FR-20 | M | A confirmation with seat/section/price is shown after booking | Confirmation displays booking reference and all booked seats |
-| FR-21 | C | A simulated payment step precedes confirmation | No real card data is collected or transmitted |
+| FR-21 | M | A real payment, via a Stripe Checkout Session with the embedded Payment Element, precedes confirmation *(v2.3: rewritten from a simulated payment — ADR-009, ADR-010)* | `POST /api/bookings` returns a `pending` booking and a `clientSecret`; the booking is confirmed only on receipt of a signature-verified `checkout.session.completed`/`payment_intent.succeeded` webhook (ADR-011), never by the client's own post-payment callback |
+| FR-26 | M | *(v2.3, new)* A booked-but-unpaid seat is held for a bounded time, not indefinitely | On booking creation the seat moves `available → held`; if the booking is still `pending` when `holdExpiresAt` passes, the hold reaper (60s sweep) releases the seat to `available` and marks the booking `expired` |
+| FR-27 | S | *(v2.3, new)* An email confirmation is sent on successful payment | A `booking-confirmed` email (reference, one stub per seat, total) is sent to the customer's address once the webhook marks the booking `confirmed`; an SMTP failure is logged and never fails the triggering request |
+| FR-28 | S | *(v2.3, new)* An SMS confirmation is sent on successful payment | A `booking-confirmed` SMS is sent via notify.lk to the customer's normalised Sri Lankan mobile number once the webhook marks the booking `confirmed`; a delivery failure is logged and never fails the triggering request |
+| FR-29 | S | *(v2.3, new)* A refund is issued when a paid booking is cancelled | Cancelling a `confirmed` booking triggers `stripe.refunds.create` against its `paymentIntentId` **before** the booking's status changes to `cancelled`, so a refund failure cannot leave a "cancelled but unrefunded" booking |
 
 ### C4.5 Venues (entity: Venue)
 
@@ -792,7 +987,7 @@ Each is stated with a measurable target so it can be verified rather than assert
 |---|---|---|---|
 | NFR-1 | Performance | Seat-state updates propagate to other clients quickly | ≤1s p95; measured in system test |
 | NFR-2 | Performance | API reads respond promptly under expected load | p95 <200 ms at 20 req/s |
-| NFR-3 | Security | Passwords hashed; state-changing endpoints require valid JWT | bcrypt cost ≥10; verified by integration tests |
+| NFR-3 | Security | Passwords hashed; state-changing endpoints require valid JWT; card data never reaches the server | bcrypt cost ≥10, verified by integration tests; payment card data is tokenised entirely client-side by Stripe's embedded Payment Element (§A12), so the server carries minimal PCI scope (SAQ A) |
 | NFR-4 | Security | Input validated and sanitised; no sensitive data in query strings | Rejection tests for malformed and injected payloads |
 | NFR-5 | Security | Auth endpoints rate-limited | Repeated failed logins throttled |
 | NFR-5a | Security | No credentials in source control | Database URI and JWT secret supplied only via environment variables; repository scanned before submission |
@@ -829,6 +1024,7 @@ Each is stated with a measurable target so it can be verified rather than assert
 | `name` | String | required, 2–80 chars |
 | `email` | String | required, unique, lowercase, valid format |
 | `passwordHash` | String | required, bcrypt, never returned by API |
+| `phone` | String | *(v2.3, new)* required, normalised Sri Lankan mobile `94XXXXXXXXX` (`^94[1-9][0-9]{8}$`); required at registration and used as the notify.lk SMS destination |
 | `role` | String | enum `customer` \| `admin`, default `customer` |
 | `createdAt` | Date | auto |
 
@@ -839,6 +1035,7 @@ Each is stated with a measurable target so it can be verified rather than assert
 | `_id` | ObjectId | PK |
 | `name` | String | required |
 | `address` | String | required |
+| `city` | String | *(v2.3, new)* required — surfaced on event listings as `venue.city` |
 | `seatLayout` | Array of `{id, section, row, number}` | required, ≤500 seats (ADR-002) |
 | `capacity` | Number | derived from layout length |
 
@@ -849,10 +1046,13 @@ Each is stated with a measurable target so it can be verified rather than assert
 | `_id` | ObjectId | PK |
 | `title` | String | required |
 | `artist` | String | required |
+| `genre` | String | *(v2.3, new)* required — powers the client's genre filter |
+| `imageUrl` | String | *(v2.3, new)* optional |
+| `description` | String | *(v2.3, new)* optional |
 | `date` | Date | required, must be future on creation |
 | `basePrice` | Number | required, ≥0 |
 | `venueRef` | ObjectId → Venue | required |
-| `seats` | Array of `{id, section, row, number, status, price}` | `status` enum `available` \| `booked` |
+| `seats` | Array of `{id, section, row, number, status, price}` | `status` enum `available` \| `held` \| `booked` *(v2.3: `held` added — ADR-009)* |
 | `status` | String | enum `scheduled` \| `cancelled` |
 
 **Booking**
@@ -863,10 +1063,21 @@ Each is stated with a measurable target so it can be verified rather than assert
 | `reference` | String | unique, human-readable (e.g. `ENC-4471`) |
 | `userRef` | ObjectId → User | required |
 | `eventRef` | ObjectId → Event | required |
-| `seats` | Array of seat ids | required, non-empty |
+| `seats` | Array of `{id, section, row, number, price}` subdocuments *(v2.3: changed from an array of seat id strings — ADR-009)* | required, non-empty; each entry is a **price snapshot** taken at booking time, so a later `basePrice` edit on the event cannot rewrite booking history, and a ticket stub can render from the booking document alone |
 | `totalPrice` | Number | computed server-side, never trusted from client |
-| `status` | String | enum `confirmed` \| `cancelled` |
+| `status` | String | enum `pending` \| `confirmed` \| `cancelled` \| `expired`, default `pending` *(v2.3: `pending`/`expired` added — ADR-009)* |
+| `holdExpiresAt` | Date | *(v2.3, new)* set on creation to `now + HOLD_TTL_MINUTES`; cleared once the booking leaves `pending`. Drives the hold-reaper sweep (§C6.3) |
+| `payment` | Object `{provider, sessionId, paymentIntentId, status, amountMinor, currency, refundId}` | *(v2.3, new)* the Stripe payment record for this booking; `amountMinor` is the Stripe minor-unit amount (LKR ×100), never the display price |
 | `createdAt` | Date | auto |
+
+**WebhookEvent** *(v2.3, new — ADR-011)*
+
+| Field | Type | Constraints |
+|---|---|---|
+| `_id` | ObjectId | PK |
+| `stripeEventId` | String | required, unique — the idempotency key that makes a replayed Stripe webhook delivery a no-op |
+| `type` | String | required — the Stripe event type, for audit/debugging |
+| `processedAt` | Date | auto |
 
 ### C6.3 Indexes
 
@@ -878,6 +1089,8 @@ Each is stated with a measurable target so it can be verified rather than assert
 | bookings | `{userRef: 1, createdAt: -1}` | "My bookings" (FR-18) |
 | bookings | `{eventRef: 1}` | Admin per-event view (FR-25) |
 | bookings | `{reference: 1}` unique | Reference lookup |
+| bookings | `{status: 1, holdExpiresAt: 1}` *(v2.3, new — ADR-009)* | The hold reaper's query (`{status: 'pending', holdExpiresAt: {$lt: now}}`), run every 60s, plus the same conditional lookup `bookingService.createBooking` uses to reap an event's own stale holds before attempting a new one (FR-26) |
+| webhookEvents | `{stripeEventId: 1}` unique *(v2.3, new — ADR-011)* | Idempotency check on webhook delivery; a duplicate key on insert means "already processed" |
 
 `totalPrice` is always recomputed server-side from stored seat prices — a client-supplied price is never trusted.
 
@@ -903,10 +1116,15 @@ All responses are JSON. All state-changing routes require `Authorization: Bearer
 | POST | `/api/venues` | Admin | `{name, address, seatLayout}` | 201 `{venue}` | 400, 403 |
 | PATCH | `/api/venues/:id` | Admin | partial venue | 200 `{venue}` | 400, 403, 404 |
 | DELETE | `/api/venues/:id` | Admin | — | 204 | 403, 404, 409 in-use |
-| POST | `/api/bookings` | Customer | `{eventId, seatIds[]}` | 201 `{booking}` | 400, 401, **409 seat taken**, 404 |
+| POST | `/api/bookings` | Customer | `{eventId, seatIds[]}` | 201 `{booking, clientSecret}` *(v2.3: booking is `pending`, seats `held`, not `booked`/`confirmed` — ADR-009)* | 400, 401, **409 seat taken**, 404 |
 | GET | `/api/bookings/me` | Customer | `?page&limit` | 200 `{bookings[]}` | 401 |
-| PATCH | `/api/bookings/:id/cancel` | Customer | — | 200 `{booking}` | 401, 403 not owner, 404 |
+| GET | `/api/bookings/:id` | Customer (owner) / Admin | — | 200 `{booking}` *(v2.3, new)* | 401, 403 not owner, 404 |
+| POST | `/api/bookings/:id/payment-session` | Customer (owner) | — | 200 `{clientSecret, publishableKey}` *(v2.3, new — re-issues a client secret while the hold is still live, e.g. after a checkout reload)* | 401, 403 not owner, 404, 409 hold no longer pending/expired |
+| PATCH | `/api/bookings/:id/cancel` | Customer | — | 200 `{booking}` — refunds via Stripe first if the booking was `confirmed` (FR-29) | 401, 403 not owner, 404, 400 event already started |
 | GET | `/api/bookings` | Admin | `?eventId&page&limit` | 200 `{bookings[], total}` | 401, 403 |
+| POST | `/api/payments/webhook` | Stripe signature (not JWT) | Raw Stripe event body + `stripe-signature` header | 200 `{received: true}` *(v2.3, new — ADR-011; the authoritative payment→booking confirmation, idempotent on replay via the `WebhookEvent` ledger)* | 400 invalid signature |
+| GET | `/api/admin/stats` | Admin | — | 200 dashboard totals: events, bookings, revenue, occupancy *(v2.3, new, FR-25)* | 401, 403 |
+| GET | `/api/admin/events` | Admin | `?page&limit` | 200 `{events[], total, page, totalPages}` with `revenue` + `bookingCount` per event; includes cancelled and past events, unlike the public `/api/events` *(v2.3, new, FR-25)* | 401, 403 |
 | GET | `/api/health` | — | — | 200 `{status, db}` | 503 db down |
 
 **Error envelope** (uniform across all failures):
@@ -921,14 +1139,15 @@ Messages are user-facing and actionable; stack traces and raw driver errors are 
 
 ### C7.2 WebSocket event catalogue
 
-Namespace `/`, rooms named `event:<eventId>`. The handshake carries the JWT; unauthenticated sockets may join rooms read-only.
+Namespace `/`, rooms named `event:<eventId>`. The handshake carries the JWT; unauthenticated sockets may join rooms read-only. *(v2.3, new)* An authenticated socket also auto-joins a private `user:<id>` room on connection, used only for the `booking:updated` event below.
 
 | Direction | Event | Payload | Purpose |
 |---|---|---|---|
 | Client → Server | `join:event` | `{eventId}` | Subscribe to an event's seat updates |
 | Client → Server | `leave:event` | `{eventId}` | Unsubscribe on navigation away |
-| Server → Client | `seats:updated` | `{eventId, seatIds[], status}` | Broadcast after a successful booking or cancellation |
+| Server → Client | `seats:updated` | `{eventId, seatIds[], status}`, `status` one of `available` \| `held` \| `booked` *(v2.3: `held` added — a seat greys out the moment a checkout starts, not only once it is paid, shrinking the ADR-004 conflict window)* | Broadcast after a seat hold, payment confirmation, hold expiry, or cancellation |
 | Server → Client | `event:cancelled` | `{eventId}` | Broadcast when an admin cancels an event |
+| Server → Client | `booking:updated` | `{bookingId, status}`, to room `user:<id>` *(v2.3, new — ADR-011)* | Broadcast to the owning user's sockets when their booking's status changes via the Stripe webhook (typically `pending → confirmed`), so the confirmation page can update without polling |
 | Server → Client | `error` | `{code, message}` | Malformed subscription or auth failure |
 
 Broadcasts are emitted **only after** the database write commits, so no client ever observes a state the server has not persisted.
@@ -942,7 +1161,13 @@ Broadcasts are emitted **only after** the database write commits, so no client e
 | MongoDB unavailable | Driver error | 503 from health endpoint; requests fail fast with a clear message; no partial writes |
 | WebSocket disconnect | Socket.IO `disconnect` | Client auto-reconnects with backoff, rejoins its room, and **re-fetches seat state** rather than trusting cache (mitigates R7) |
 | Unhandled server error | Global error middleware | Logged with stack and request id; client receives a generic 500 with no internal detail |
-| Malformed request body | Validation middleware | 400 listing the offending fields |
+| Malformed request body | Validation middleware (`zod`, NFR-4) | 400 `VALIDATION_ERROR` listing the offending fields |
+| Seat hold not paid within `HOLD_TTL_MINUTES` *(v2.3, new — ADR-009)* | Hold-reaper sweep every 60s finds `{status: 'pending', holdExpiresAt: {$lt: now}}` | Booking → `expired`, seats `held → available`, Stripe session expired, `seats:updated` broadcast; the client's countdown redirects to the event with a "Your seat hold expired" message before this fires server-side |
+| Stripe webhook delivered more than once *(v2.3, new — ADR-011)* | `WebhookEvent` insert on `stripeEventId` throws a duplicate-key error | 200 `{received: true}` returned immediately with no further processing — Stripe's at-least-once delivery cannot double-confirm a booking |
+| Stripe webhook signature invalid *(v2.3, new — ADR-011)* | `stripe.webhooks.constructEvent` throws | 400 `INVALID_SIGNATURE`; the payload is never processed |
+| Card payment declined/fails *(v2.3, new)* | `payment_intent.payment_failed` webhook | Booking stays `pending` — the hold is still live, so the user can retry with a different card before it expires; a `payment-failed` email is sent (best-effort) |
+
+**Notification failures never propagate.** *(v2.3, new — ADR-012)* Email (nodemailer) and SMS (notify.lk) sends are fire-and-forget from the caller's perspective and wrapped so a failure is logged, never thrown — a dead SMTP host or a notify.lk outage cannot turn a successful booking or payment into a failed request.
 
 **Retry policy:** the client retries idempotent reads (GET) with exponential backoff up to three attempts. Booking creation is **never** retried automatically, since a blind retry could produce a duplicate booking; the user is instead shown the conflict and asked to choose again.
 
@@ -955,9 +1180,14 @@ Broadcasts are emitted **only after** the database write commits, so no client e
 | FR-13–14 | Seat map component, socket gateway | ADR-003 |
 | FR-15 | Atomic conditional update in booking service | ADR-004 |
 | FR-16 | Client reconnect handler | ADR-003 |
-| FR-17–21 | Booking controller/service | ADR-002, ADR-004 |
+| FR-17–20 | Booking controller/service | ADR-002, ADR-004 |
+| FR-21 | Payment service, Stripe config, webhook controller *(v2.3, new)* | ADR-009, ADR-010, ADR-011 |
 | FR-22–23 | Venue controller, seat layout derivation | ADR-002 |
+| FR-26 | Booking service (hold TTL), hold-reaper job *(v2.3, new)* | ADR-009 |
+| FR-27–28 | Notification service, email/SMS services, webhook confirmation handler *(v2.3, new)* | ADR-011, ADR-012 |
+| FR-29 | Booking service cancellation path, payment service refund *(v2.3, new)* | ADR-009, ADR-011 |
 | NFR-2 | Indexes, no cache | ADR-006 |
+| NFR-3 | Stripe Payment Element (client-side tokenisation) *(v2.3, new)* | ADR-010 |
 | NFR-6 | Atomic update | ADR-004 |
 
 ## C9. Requirements traceability to rubric
@@ -966,10 +1196,10 @@ Broadcasts are emitted **only after** the database write commits, so no client e
 |---|---|
 | Analysis (10%) | §A2–A5, §C3–C5 (users, benefits, prioritised testable requirements) |
 | Design (20%) | §A6 (component diagram, data flow), §C6–C7 (data model, API contract), Part B (ADRs) |
-| Software (30%) | FR-1–25 (CRUD ×4, WebSockets, security, distributed) |
+| Software (30%) | FR-1–29 (CRUD ×4, WebSockets, security, distributed, real payment and notifications *(v2.3)*) |
 | Testing (20%) | Part D (pyramid, coverage targets, four levels, example cases) |
 | CI/CD (10%) | §A9, §D7 (pipeline from S0) |
-| Evaluation (10%) | O1–O7 success criteria; ADR "revisit when" triggers |
+| Evaluation (10%) | O1–O7 success criteria; ADR "revisit when" triggers, including ADR-004's firing in ADR-009 *(v2.3)* |
 
 ---
 # Part D — Test Strategy and Plan
@@ -1093,18 +1323,19 @@ Because the client is TypeScript, `tsc --noEmit` acts as a further verification 
 | Aspect | Plan |
 |---|---|
 | Participants | Target 5, minimum 3 (5 is the established point of diminishing returns for usability findings) |
-| Protocol | Task-based, think-aloud. Tasks: (1) register, (2) find a named artist's concert, (3) book two adjacent seats, (4) find your booking reference, (5) cancel it |
+| Protocol | Task-based, think-aloud. Tasks: (1) register, (2) find a named artist's concert, (3) book two adjacent seats — now exercising the real Stripe hold-then-pay flow, ADR-009/ADR-010 — (4) find your booking reference, (5) cancel it and confirm the refund |
 | Measures | Task completion rate, time on task, errors, observed points of confusion, short post-task rating |
 | Ethics | Informed consent obtained, purpose explained, right to withdraw, results anonymised, no personal data retained — per University requirements |
 | Output | Findings ranked by severity, the modifications made in response, and a re-test of any changed flow |
 
-Recording *what changed as a result* is essential — the rubric's top band explicitly asks for resultant modifications, not merely that testing happened.
+Recording *what changed as a result* is essential — the rubric's top band explicitly asks for resultant modifications, not merely that testing happened. **The full runnable protocol — session script, the informed-consent wording, and the findings/modifications record — is `docs/uat-plan.md` (v2.3, new); this table summarises it.**
 
 ### D4.7 Static analysis
 
 - **ESLint** across client (`@typescript-eslint`) and server; zero errors required for the pipeline to pass.
 - **TypeScript compiler** (`tsc --noEmit`, strict mode) on the client; type errors fail the build. Compiler strictness is itself a static-analysis metric worth reporting.
 - **Metrics captured for the report:** total files and lines, rule violations found and fixed over time, complexity warnings, and the count of type errors resolved during development (evidence the TypeScript investment paid off — useful material for the Evaluation section).
+- **Point-in-time snapshot: `docs/static-analysis.md` (v2.3, new)** records an actual run of these checks (not an estimate) — file/line counts and the exact ESLint/`tsc` findings at time of writing, with each finding's root cause identified and a re-run required before submission.
 
 ## D5. Test data and environments
 
@@ -1136,15 +1367,24 @@ Recording *what changed as a result* is essential — the rubric's top band expl
 | FR-17/18 booking create + read | ✔ | ✔ | ✔ | ✔ | ✔ |
 | FR-19 cancellation | ✔ | ✔ | ✔ | — | ✔ |
 | FR-20 confirmation | — | ✔ | ✔ | ✔ | ✔ |
-| FR-21 simulated payment | — | ✔ | ✔ | ✔ | — |
+| FR-21 real Stripe payment *(v2.3: rewritten from simulated payment)* | ✔ | ✔* | ✔† | ✔† | ✔† |
 | FR-22/23 venues | ✔ | ✔ | ✔ | — | — |
 | FR-24/25 admin views | ✔ | ✔ | — | — | ✔ |
+| FR-26 seat hold with TTL *(v2.3, new)* | ✔ | —† | ✔† | — | — |
+| FR-27 email confirmation *(v2.3, new)* | ✔ | —† | ✔† | — | — |
+| FR-28 SMS confirmation *(v2.3, new)* | ✔ | —† | ✔† | — | — |
+| FR-29 refund on cancellation *(v2.3, new)* | ✔* | —† | ✔† | — | — |
 | NFR-1 latency | — | — | ✔ | — | — |
 | NFR-3/4/5 security | ✔ | ✔ | ✔ | — | — |
 | NFR-6 integrity | ✔ | ✔ | — | — | — |
 | NFR-12 accessibility | — | — | — | ✔ | ✔ |
 
 Every "Must" requirement is covered at two or more levels.
+
+**v2.3 coverage notes, stated honestly rather than rounded up:**
+- `✔*` — partially covered: the underlying Stripe call is unit-tested in isolation (`tests/unit/paymentService.test.js` covers `refundPayment`; `tests/integration/api.integration.test.js` covers booking creation opening a mocked Stripe session and returning `pending`), but the specific end-to-end flow named by the requirement (webhook-driven confirmation for FR-21; cancel-a-confirmed-booking-and-refund for FR-29) does not yet have its own integration test.
+- `✔†` / `—†` — planned, not yet built at the time of this amendment: `tests/integration/payments.webhook.test.js` and `tests/integration/notifications.test.js` (§D4.2), the Playwright system journeys (§D4.4), and the client Vitest/RTL component suite (§D4.5) are specified but had not landed in the repository when this SRS section was amended. This is a point-in-time snapshot, to be closed out and re-verified before submission — see `docs/static-analysis.md`.
+- FR-27/FR-28 unit tests (`tests/unit/emailService.test.js`, `tests/unit/smsService.test.js`, `tests/unit/phone.test.js`) verify template content, truncation, brand-prefixing, and that a transport/API failure never throws — but not that `notificationService` is actually invoked at the right point in the webhook handler under integration conditions.
 
 ## D7. Testing in the CI/CD pipeline
 

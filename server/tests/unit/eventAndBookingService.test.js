@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { connectTestDB, clearTestDB, closeTestDB } from '../helpers/db.js';
-import * as eventService from '../../src/services/eventService.js';
-import * as bookingService from '../../src/services/bookingService.js';
-import * as authService from '../../src/services/authService.js';
+import { createStripeMock, mockStripeModule } from '../helpers/mocks.js';
 import Venue from '../../src/models/Venue.js';
 import Event from '../../src/models/Event.js';
+
+// Stripe must be mocked before the dynamic import of bookingService below,
+// since bookingService -> paymentService -> config/stripe.js -> 'stripe'.
+const stripeMock = createStripeMock();
+mockStripeModule(stripeMock);
+
+let eventService;
+let bookingService;
+let authService;
 
 describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
   let venue;
@@ -12,6 +19,9 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
 
   beforeAll(async () => {
     await connectTestDB();
+    eventService = await import('../../src/services/eventService.js');
+    bookingService = await import('../../src/services/bookingService.js');
+    authService = await import('../../src/services/authService.js');
   });
 
   afterAll(async () => {
@@ -20,10 +30,12 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
 
   beforeEach(async () => {
     await clearTestDB();
+    stripeMock.checkout.sessions.create.mockClear();
 
     venue = await Venue.create({
       name: 'Hall Alpha',
       address: '100 Music Road',
+      city: 'Colombo',
       seatLayout: [
         { id: 'S-1', section: 'Balcony', row: 'A', number: 1 },
         { id: 'S-2', section: 'Balcony', row: 'A', number: 2 },
@@ -35,6 +47,7 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
       name: 'Test Customer',
       email: 'customer.test@encore.com',
       password: 'password123',
+      phone: '0771234567',
     });
     user = reg.user;
   });
@@ -44,6 +57,7 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     const event = await eventService.createEvent({
       title: 'Jazz Fest',
       artist: 'Miles Tribute',
+      genre: 'Jazz',
       date: futureDate,
       basePrice: 60,
       venueRef: venue._id,
@@ -52,6 +66,7 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     expect(event.seats).toHaveLength(2);
     expect(event.seats[0].price).toBe(60);
     expect(event.seats[0].status).toBe('available');
+    expect(event.genre).toBe('Jazz');
   });
 
   it('FR-10: rejects event creation with past date', async () => {
@@ -60,7 +75,24 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
       eventService.createEvent({
         title: 'Old Gig',
         artist: 'Old Band',
+        genre: 'Rock',
         date: pastDate,
+        basePrice: 50,
+        venueRef: venue._id,
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('FR-10: rejects event creation with a missing genre', async () => {
+    const futureDate = new Date(Date.now() + 86400000 * 2);
+    await expect(
+      eventService.createEvent({
+        title: 'No Genre Gig',
+        artist: 'Mystery Band',
+        date: futureDate,
         basePrice: 50,
         venueRef: venue._id,
       })
@@ -77,6 +109,7 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     await eventService.createEvent({
       title: 'Indie Night',
       artist: 'Arctic Monks',
+      genre: 'Indie',
       date: d1,
       basePrice: 45,
       venueRef: venue._id,
@@ -85,6 +118,7 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     await eventService.createEvent({
       title: 'Pop Blast',
       artist: 'Dua Lipa Tribute',
+      genre: 'Pop',
       date: d2,
       basePrice: 55,
       venueRef: venue._id,
@@ -100,6 +134,7 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     const event = await eventService.createEvent({
       title: 'To Cancel',
       artist: 'Ghost Band',
+      genre: 'Rock',
       date: futureDate,
       basePrice: 30,
       venueRef: venue._id,
@@ -110,25 +145,37 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     expect(cancelled.status).toBe('cancelled');
   });
 
-  it('FR-18 & FR-24: queries user bookings and admin all bookings', async () => {
+  it('FR-18 & FR-24: queries user bookings and admin all bookings for a pending (held) booking', async () => {
     const futureDate = new Date(Date.now() + 86400000 * 7);
     const event = await eventService.createEvent({
       title: 'VIP Gala',
       artist: 'Chamber Orchestra',
+      genre: 'Classical',
       date: futureDate,
       basePrice: 120,
       venueRef: venue._id,
     });
 
-    await bookingService.createBooking({
-      userId: user._id,
+    const { booking, clientSecret } = await bookingService.createBooking({
+      userId: user.id,
+      customerEmail: user.email,
       eventId: event._id,
       seatIds: ['S-1'],
     });
 
-    const userBookings = await bookingService.getUserBookings(user._id);
+    // ADR-009: createBooking only ever opens a hold + Stripe session; the
+    // booking is `pending` until the webhook confirms it.
+    expect(booking.status).toBe('pending');
+    expect(clientSecret).toBeTruthy();
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledTimes(1);
+
+    const eventAfterHold = await Event.findById(event._id);
+    expect(eventAfterHold.seats.find((s) => s.id === 'S-1').status).toBe('held');
+
+    const userBookings = await bookingService.getUserBookings(user.id);
     expect(userBookings.bookings).toHaveLength(1);
     expect(userBookings.total).toBe(1);
+    expect(userBookings.bookings[0].status).toBe('pending');
 
     const allBookings = await bookingService.getAllBookings({ eventId: event._id });
     expect(allBookings.bookings).toHaveLength(1);

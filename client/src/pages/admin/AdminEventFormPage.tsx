@@ -1,49 +1,41 @@
 import * as React from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Save, Trash2 } from 'lucide-react'
-import { EVENTS, VENUES, GENRES } from '@/lib/mockData'
+import * as eventsApi from '@/lib/api/events'
+import * as venuesApi from '@/lib/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
+import { Textarea } from '@/components/ui/Textarea'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { Modal } from '@/components/ui/Modal'
+import { useToast } from '@/components/ui/toast'
+import { useAsync } from '@/hooks/useAsync'
+import { parseApiError } from '@/lib/api/errors'
+import type { EventStatus } from '@/lib/types'
 
 interface EventFormState {
   title: string
   artist: string
   date: string
-  venueId: string
+  venueRef: string
   basePrice: string
   genre: string
   description: string
-  image: string
-  status: 'scheduled' | 'cancelled'
+  imageUrl: string
+  status: EventStatus
 }
 
-function Textarea({
-  label,
-  error,
-  ...props
-}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; error?: string }) {
-  const id = React.useId()
-  return (
-    <div className="flex flex-col">
-      {label && (
-        <label htmlFor={id} className="mb-1.5 text-[13px] text-text-secondary">
-          {label}
-        </label>
-      )}
-      <textarea
-        id={id}
-        className={cn(
-          'min-h-[100px] rounded-[var(--radius)] border-[0.5px] border-border bg-card px-3 py-2.5 text-[15px] resize-y',
-          'placeholder:text-text-muted transition-colors',
-          'focus-visible:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink',
-          error && 'border-destructive',
-        )}
-        {...props}
-      />
-      {error && <p className="mt-1.5 text-[13px] text-destructive">{error}</p>}
-    </div>
-  )
+const EMPTY_FORM: EventFormState = {
+  title: '',
+  artist: '',
+  date: '',
+  venueRef: '',
+  basePrice: '',
+  genre: '',
+  description: '',
+  imageUrl: '',
+  status: 'scheduled',
 }
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -64,23 +56,41 @@ function FormRow({ children }: { children: React.ReactNode }) {
 export function AdminEventFormPage() {
   const { id } = useParams<{ id?: string }>()
   const navigate = useNavigate()
+  const { toast } = useToast()
   const isEdit = Boolean(id && id !== 'new')
-  const existing = isEdit ? EVENTS.find((e) => e.id === id) : undefined
 
-  const [form, setForm] = React.useState<EventFormState>({
-    title: existing?.title ?? '',
-    artist: existing?.artist ?? '',
-    date: existing ? existing.date.slice(0, 16) : '',
-    venueId: existing?.venue.id ?? '',
-    basePrice: existing ? String(existing.basePrice) : '',
-    genre: existing?.genre ?? '',
-    description: existing?.description ?? '',
-    image: existing?.image ?? '',
-    status: existing?.status ?? 'scheduled',
-  })
+  const eventState = useAsync(
+    () => (isEdit && id ? eventsApi.getById(id) : Promise.resolve(null)),
+    [id, isEdit],
+  )
+  const venuesState = useAsync(() => venuesApi.list(), [], { isEmpty: (d) => d.venues.length === 0 })
 
-  const [errors, setErrors] = React.useState<Partial<EventFormState>>({})
-  const [saved, setSaved] = React.useState(false)
+  const [form, setForm] = React.useState<EventFormState>(EMPTY_FORM)
+  const [errors, setErrors] = React.useState<Partial<Record<keyof EventFormState, string>>>({})
+  const [saving, setSaving] = React.useState(false)
+  const [deleteOpen, setDeleteOpen] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
+
+  // Derive the form's initial values from the fetched event once it lands.
+  // Adjusted during render (React's documented alternative to an effect
+  // that only mirrors another value) rather than in a useEffect, since the
+  // fetch itself is what's async — not this synchronisation step.
+  const [syncedFrom, setSyncedFrom] = React.useState<typeof eventState.data>(null)
+  if (eventState.status === 'success' && eventState.data && eventState.data !== syncedFrom) {
+    const existing = eventState.data.event
+    setSyncedFrom(eventState.data)
+    setForm({
+      title: existing.title,
+      artist: existing.artist,
+      date: existing.date.slice(0, 16),
+      venueRef: existing.venue.id,
+      basePrice: String(existing.basePrice),
+      genre: existing.genre,
+      description: existing.description ?? '',
+      imageUrl: existing.imageUrl ?? '',
+      status: existing.status,
+    })
+  }
 
   const set = (key: keyof EventFormState) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
@@ -90,11 +100,11 @@ export function AdminEventFormPage() {
   }
 
   const validate = (): boolean => {
-    const errs: Partial<EventFormState> = {}
+    const errs: Partial<Record<keyof EventFormState, string>> = {}
     if (!form.title.trim()) errs.title = 'Title is required'
     if (!form.artist.trim()) errs.artist = 'Artist is required'
     if (!form.date) errs.date = 'Date is required'
-    if (!form.venueId) errs.venueId = 'Select a venue'
+    if (!form.venueRef) errs.venueRef = 'Select a venue'
     if (!form.basePrice || Number(form.basePrice) <= 0) errs.basePrice = 'Enter a valid price'
     if (!form.genre.trim()) errs.genre = 'Genre is required'
     if (!form.description.trim()) errs.description = 'Description is required'
@@ -102,16 +112,62 @@ export function AdminEventFormPage() {
     return Object.keys(errs).length === 0
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) return
-    // In a real app: POST/PATCH to API. For now, show success state.
-    setSaved(true)
-    setTimeout(() => {
+    setSaving(true)
+    try {
+      const payload = {
+        title: form.title.trim(),
+        artist: form.artist.trim(),
+        genre: form.genre.trim(),
+        imageUrl: form.imageUrl.trim() || undefined,
+        description: form.description.trim(),
+        date: new Date(form.date).toISOString(),
+        basePrice: Number(form.basePrice),
+        venueRef: form.venueRef,
+      }
+      if (isEdit && id) {
+        await eventsApi.update(id, { ...payload, status: form.status })
+        toast('Changes saved.', 'success')
+      } else {
+        await eventsApi.create(payload)
+        toast('Event created.', 'success')
+      }
       navigate('/admin/events')
-    }, 1200)
+    } catch (err) {
+      toast(parseApiError(err).message, 'error')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const selectedVenue = VENUES.find((v) => v.id === form.venueId)
+  const handleDelete = async () => {
+    if (!id) return
+    setDeleting(true)
+    try {
+      await eventsApi.remove(id)
+      toast('Event deleted.', 'success')
+      navigate('/admin/events')
+    } catch (err) {
+      toast(parseApiError(err).message, 'error')
+      setDeleting(false)
+    }
+  }
+
+  const venues = venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
+  const selectedVenue = venues.find((v) => v.id === form.venueRef)
+
+  if (isEdit && eventState.status === 'loading') {
+    return <Spinner label="Loading event…" className="py-32" />
+  }
+
+  if (isEdit && eventState.status === 'error') {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-8">
+        <ErrorState description={eventState.error.message} onRetry={eventState.retry} />
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
@@ -128,15 +184,9 @@ export function AdminEventFormPage() {
           {isEdit ? 'Edit event' : 'New event'}
         </p>
         <h1 className="mt-1 font-voice text-[36px] font-medium leading-tight tracking-[-0.02em]">
-          {isEdit ? existing?.title ?? 'Edit event' : 'Create event'}
+          {isEdit ? form.title || 'Edit event' : 'Create event'}
         </h1>
       </div>
-
-      {saved && (
-        <div className="mb-6 rounded-[var(--radius)] border-[0.5px] border-stage-green/30 bg-stage-green/10 px-4 py-3 text-[14px] text-stage-green">
-          {isEdit ? 'Changes saved.' : 'Event created.'} Redirecting…
-        </div>
-      )}
 
       <div className="flex flex-col gap-8">
         <FormSection title="Identity">
@@ -160,7 +210,13 @@ export function AdminEventFormPage() {
             value={form.genre}
             onChange={set('genre')}
             error={errors.genre}
+            list="genre-suggestions"
           />
+          <datalist id="genre-suggestions">
+            {['Folk', 'Soul', 'Contemporary', 'Synth-pop', 'Choral', 'Post-rock'].map((g) => (
+              <option key={g} value={g} />
+            ))}
+          </datalist>
           <div>
             <Select
               label="Status"
@@ -182,9 +238,9 @@ export function AdminEventFormPage() {
           </FormRow>
         </FormSection>
 
-        <FormSection title="When &amp; where">
+        <FormSection title="When & where">
           <Input
-            label="Date &amp; time"
+            label="Date & time"
             type="datetime-local"
             value={form.date}
             onChange={set('date')}
@@ -193,17 +249,18 @@ export function AdminEventFormPage() {
           <div>
             <Select
               label="Venue"
-              value={form.venueId}
-              onChange={set('venueId')}
+              value={form.venueRef}
+              onChange={set('venueRef')}
             >
               <option value="">Select venue…</option>
-              {VENUES.map((v) => (
+              {venues.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}, {v.city}
                 </option>
               ))}
             </Select>
-            {selectedVenue && (
+            {errors.venueRef && <p className="mt-1.5 text-[13px] text-destructive">{errors.venueRef}</p>}
+            {selectedVenue && !errors.venueRef && (
               <p className="mt-1.5 font-mono text-[12px] text-text-muted">
                 {selectedVenue.city}
               </p>
@@ -213,11 +270,11 @@ export function AdminEventFormPage() {
 
         <FormSection title="Ticketing">
           <Input
-            label="Base price (GBP)"
+            label="Base price (LKR)"
             type="number"
             min="1"
             step="0.50"
-            placeholder="32.00"
+            placeholder="6500.00"
             value={form.basePrice}
             onChange={set('basePrice')}
             error={errors.basePrice}
@@ -228,13 +285,13 @@ export function AdminEventFormPage() {
               {form.basePrice ? (
                 <>
                   <p className="font-mono">
-                    Stalls: £{Math.round(Number(form.basePrice) * 1.6)}
+                    Stalls: Rs {Math.round(Number(form.basePrice) * 1.6)}
                   </p>
                   <p className="font-mono">
-                    Circle: £{Math.round(Number(form.basePrice) * 1.15)}
+                    Circle: Rs {Math.round(Number(form.basePrice) * 1.15)}
                   </p>
                   <p className="font-mono">
-                    Balcony: £{Math.round(Number(form.basePrice) * 0.85)}
+                    Balcony: Rs {Math.round(Number(form.basePrice) * 0.85)}
                   </p>
                 </>
               ) : (
@@ -247,15 +304,15 @@ export function AdminEventFormPage() {
               label="Cover image URL"
               type="url"
               placeholder="https://images.unsplash.com/…"
-              value={form.image}
-              onChange={set('image')}
+              value={form.imageUrl}
+              onChange={set('imageUrl')}
             />
           </FormRow>
-          {form.image && (
+          {form.imageUrl && (
             <FormRow>
               <div className="overflow-hidden rounded-[var(--radius)] border-[0.5px] border-border">
                 <img
-                  src={form.image}
+                  src={form.imageUrl}
                   alt="Event cover preview"
                   className="h-36 w-full object-cover"
                 />
@@ -272,7 +329,7 @@ export function AdminEventFormPage() {
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive"
-            onClick={() => navigate('/admin/events')}
+            onClick={() => setDeleteOpen(true)}
           >
             <Trash2 className="size-4" />
             Delete event
@@ -284,12 +341,34 @@ export function AdminEventFormPage() {
           <Button variant="secondary" size="sm" onClick={() => navigate('/admin/events')}>
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saved}>
+          <Button size="sm" onClick={handleSave} isLoading={saving}>
             <Save className="size-4" />
             {isEdit ? 'Save changes' : 'Create event'}
           </Button>
         </div>
       </div>
+
+      <Modal
+        open={deleteOpen}
+        onClose={() => !deleting && setDeleteOpen(false)}
+        title="Delete this event?"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={handleDelete} isLoading={deleting}>
+              Delete event
+            </Button>
+          </>
+        }
+      >
+        <p>
+          <span className="font-medium text-foreground">{form.title || 'This event'}</span> will
+          be deleted. Confirmed bookings against it are refunded and their customers notified.
+          This cannot be undone.
+        </p>
+      </Modal>
     </div>
   )
 }

@@ -37,6 +37,11 @@ const venueSchema = new mongoose.Schema(
       required: [true, 'Venue address is required'],
       trim: true,
     },
+    city: {
+      type: String,
+      required: [true, 'Venue city is required'],
+      trim: true,
+    },
     seatLayout: {
       type: [seatLayoutSchema],
       required: [true, 'Seat layout is required'],

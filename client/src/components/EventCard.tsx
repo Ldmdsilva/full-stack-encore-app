@@ -26,7 +26,7 @@ export function EventCard({ event }: { event: EventSummary }) {
         aria-label={`View ${event.title} by ${event.artist}`}
       >
         <img
-          src={event.image}
+          src={event.imageUrl}
           alt=""
           className="size-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           loading="lazy"

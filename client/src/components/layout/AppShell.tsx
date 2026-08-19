@@ -1,11 +1,11 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Ticket, LogOut, LayoutDashboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useStore } from '@/lib/store'
+import { useAuth } from '@/context/AuthContext'
 import { cn } from '@/lib/utils'
 
 function Header() {
-  const { user, logout, isAdmin } = useStore()
+  const { user, logout, isAdmin } = useAuth()
   const navigate = useNavigate()
 
   const navClass = ({ isActive }: { isActive: boolean }) =>

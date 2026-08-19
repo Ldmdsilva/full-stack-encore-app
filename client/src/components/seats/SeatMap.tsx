@@ -31,6 +31,21 @@ export function SeatMap({ seats, selectedIds, onToggle, liveMessage }: SeatMapPr
   }, [seats])
 
   const flat = seats
+  // Precomputed id → index map so keyboard nav and render stay O(1) per
+  // seat instead of O(n) — venues can now reach 500 seats.
+  const indexById = React.useMemo(() => {
+    const map = new Map<string, number>()
+    flat.forEach((s, i) => map.set(s.id, i))
+    return map
+  }, [flat])
+  const rowLenBySeatId = React.useMemo(() => {
+    const map = new Map<string, number>()
+    for (const [, rowSeats] of rows) {
+      for (const s of rowSeats) map.set(s.id, rowSeats.length)
+    }
+    return map
+  }, [rows])
+
   const focusSeat = (idx: number) => {
     const clamped = Math.max(0, Math.min(flat.length - 1, idx))
     setActiveIdx(clamped)
@@ -38,8 +53,8 @@ export function SeatMap({ seats, selectedIds, onToggle, liveMessage }: SeatMapPr
   }
 
   const onKeyNav = (e: React.KeyboardEvent, seat: SeatT) => {
-    const i = flat.findIndex((s) => s.id === seat.id)
-    const rowLen = rows.find(([, r]) => r.includes(seat))?.[1].length ?? 12
+    const i = indexById.get(seat.id) ?? 0
+    const rowLen = rowLenBySeatId.get(seat.id) ?? 12
     switch (e.key) {
       case 'ArrowRight':
         e.preventDefault()
@@ -85,7 +100,7 @@ export function SeatMap({ seats, selectedIds, onToggle, liveMessage }: SeatMapPr
               }}
             >
               {rowSeats.map((seat) => {
-                const globalIdx = flat.findIndex((s) => s.id === seat.id)
+                const globalIdx = indexById.get(seat.id) ?? 0
                 return (
                   <Seat
                     key={seat.id}
@@ -111,6 +126,12 @@ export function SeatMap({ seats, selectedIds, onToggle, liveMessage }: SeatMapPr
         </span>
         <span>
           <span className={`${SWATCH} bg-marquee-gold`} /> Selected
+        </span>
+        <span>
+          <span className={`${SWATCH} relative bg-seat-taken opacity-55`}>
+            <span className="absolute inset-0 rounded-[3px] border border-dashed border-ink/30" />
+          </span>{' '}
+          On hold
         </span>
         <span>
           <span className={`${SWATCH} bg-seat-taken opacity-55`} /> Taken

@@ -1,11 +1,15 @@
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingUp, Calendar, BookOpen, Users, ArrowUpRight } from 'lucide-react'
-import { getAdminStats, ALL_BOOKINGS } from '@/lib/adminMockData'
+import * as adminApi from '@/lib/api/admin'
+import * as bookingsApi from '@/lib/api/bookings'
 import { formatPrice, formatEventDate } from '@/lib/formatters'
-import { EVENTS } from '@/lib/mockData'
 import { Badge } from '@/components/ui/badge'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { useAsync } from '@/hooks/useAsync'
 import { cn } from '@/lib/utils'
+import type { BookingStatus } from '@/lib/types'
 
 function KpiCard({
   label,
@@ -59,20 +63,40 @@ function KpiCard({
   )
 }
 
-function BookingStatusBadge({ status }: { status: 'confirmed' | 'cancelled' }) {
-  return (
-    <Badge variant={status === 'confirmed' ? 'confirmed' : 'cancelled'}>
-      {status === 'confirmed' ? 'Confirmed' : 'Cancelled'}
-    </Badge>
-  )
+function BookingStatusBadge({ status }: { status: BookingStatus }) {
+  const variant = status === 'confirmed' ? 'confirmed' : status === 'pending' ? 'pending' : status === 'expired' ? 'expired' : 'cancelled'
+  const label = status.charAt(0).toUpperCase() + status.slice(1)
+  return <Badge variant={variant}>{label}</Badge>
 }
 
 export function AdminDashboard() {
-  const stats = React.useMemo(() => getAdminStats(), [])
-  const recentBookings = ALL_BOOKINGS.slice(0, 8)
-  const topEvents = [...EVENTS]
-    .sort((a, b) => b.seats.filter((s) => s.status === 'booked').length - a.seats.filter((s) => s.status === 'booked').length)
-    .slice(0, 4)
+  const statsState = useAsync(() => adminApi.stats(), [])
+  const bookingsState = useAsync(() => bookingsApi.listAll({ limit: 8 }), [], {
+    isEmpty: (d) => d.bookings.length === 0,
+  })
+  const eventsState = useAsync(() => adminApi.listEvents({ limit: 50 }), [], {
+    isEmpty: (d) => d.events.length === 0,
+  })
+
+  const recentBookings = bookingsState.status === 'success' ? bookingsState.data.bookings : []
+  const topEvents =
+    eventsState.status === 'success'
+      ? [...eventsState.data.events].sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 4)
+      : []
+
+  if (statsState.status === 'loading') {
+    return <Spinner label="Loading dashboard…" className="py-32" />
+  }
+
+  if (statsState.status === 'error') {
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        <ErrorState description={statsState.error.message} onRetry={statsState.retry} />
+      </div>
+    )
+  }
+
+  const stats = statsState.data
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -144,55 +168,64 @@ export function AdminDashboard() {
             </Link>
           </div>
           <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card shadow-[var(--shadow-card)] overflow-hidden">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="border-b-[0.5px] border-border bg-surface-sunk">
-                  <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                    Ref
-                  </th>
-                  <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                    Fan
-                  </th>
-                  <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
-                    Event
-                  </th>
-                  <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                    Total
-                  </th>
-                  <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentBookings.map((b, i) => (
-                  <tr
-                    key={b.id}
-                    className={cn(
-                      'transition-colors hover:bg-surface-sunk/50',
-                      i < recentBookings.length - 1 && 'border-b-[0.5px] border-border',
-                    )}
-                  >
-                    <td className="px-4 py-3 font-mono text-[12px] text-text-secondary">
-                      {b.reference}
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium leading-tight">{b.customerName}</p>
-                      <p className="text-[11px] text-text-muted">{b.customerEmail}</p>
-                    </td>
-                    <td className="hidden px-4 py-3 text-text-secondary md:table-cell">
-                      {b.event.title}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">
-                      {formatPrice(b.totalPrice)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <BookingStatusBadge status={b.status} />
-                    </td>
+            {bookingsState.status === 'loading' && <Spinner label="Loading bookings…" className="py-10" />}
+            {bookingsState.status === 'error' && (
+              <ErrorState description={bookingsState.error.message} onRetry={bookingsState.retry} className="py-10" />
+            )}
+            {bookingsState.status === 'empty' && (
+              <p className="px-4 py-10 text-center text-[13px] text-text-muted">No bookings yet.</p>
+            )}
+            {bookingsState.status === 'success' && (
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b-[0.5px] border-border bg-surface-sunk">
+                    <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                      Ref
+                    </th>
+                    <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                      Fan
+                    </th>
+                    <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
+                      Event
+                    </th>
+                    <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                      Total
+                    </th>
+                    <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                      Status
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {recentBookings.map((b, i) => (
+                    <tr
+                      key={b.id}
+                      className={cn(
+                        'transition-colors hover:bg-surface-sunk/50',
+                        i < recentBookings.length - 1 && 'border-b-[0.5px] border-border',
+                      )}
+                    >
+                      <td className="px-4 py-3 font-mono text-[12px] text-text-secondary">
+                        {b.reference}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium leading-tight">{b.user?.name ?? '—'}</p>
+                        <p className="text-[11px] text-text-muted">{b.user?.email ?? ''}</p>
+                      </td>
+                      <td className="hidden px-4 py-3 text-text-secondary md:table-cell">
+                        {b.event?.title ?? '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {formatPrice(b.totalPrice)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <BookingStatusBadge status={b.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -208,9 +241,15 @@ export function AdminDashboard() {
             </Link>
           </div>
           <div className="flex flex-col gap-3">
+            {eventsState.status === 'loading' && <Spinner label="Loading events…" className="py-10" />}
+            {eventsState.status === 'error' && (
+              <ErrorState description={eventsState.error.message} onRetry={eventsState.retry} className="py-10" />
+            )}
+            {eventsState.status === 'empty' && (
+              <p className="py-10 text-center text-[13px] text-text-muted">No events yet.</p>
+            )}
             {topEvents.map((evt) => {
-              const booked = evt.seats.filter((s) => s.status === 'booked').length
-              const pct = Math.round((booked / evt.totalSeats) * 100)
+              const pct = evt.totalSeats > 0 ? Math.round(((evt.totalSeats - evt.availableSeats) / evt.totalSeats) * 100) : 0
               return (
                 <Link
                   key={evt.id}

@@ -1,11 +1,15 @@
-import * as React from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { ArrowRight, Radio, MapPin, Clock, Ticket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EventCard } from '@/components/EventCard'
 import { TicketStub } from '@/components/TicketStub'
-import { EVENTS } from '@/lib/mockData'
-import { formatStubDate, formatEventDate, formatPrice } from '@/lib/formatters'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { useAsync } from '@/hooks/useAsync'
+import * as eventsApi from '@/lib/api/events'
+import * as venuesApi from '@/lib/api/venues'
+import { formatStubDate, formatPrice } from '@/lib/formatters'
 
 // Pulse dot — the live-sync indicator used across the hero
 function PulseDot({ className = '' }: { className?: string }) {
@@ -42,12 +46,22 @@ function StatPill({ value, label }: { value: string; label: string }) {
   )
 }
 
-const featuredEvents = EVENTS.slice(0, 3)
-const heroEvent = EVENTS[3] // Vela — synth-pop, good image
-
 export function HomePage() {
   const navigate = useNavigate()
-  const totalSeats = EVENTS.reduce((s, e) => s + e.availableSeats, 0)
+
+  // Fetch a small batch up front — one card doubles as the hero stub, the
+  // rest fill the "Upcoming shows" and "signature" sections below.
+  const eventsState = useAsync(() => eventsApi.list({ limit: 4 }), [], {
+    isEmpty: (d) => d.events.length === 0,
+  })
+  const venuesState = useAsync(() => venuesApi.list(), [], { isEmpty: (d) => d.venues.length === 0 })
+
+  const events = eventsState.status === 'success' || eventsState.status === 'empty' ? eventsState.data.events : []
+  const totalShows = eventsState.status === 'success' || eventsState.status === 'empty' ? eventsState.data.total : 0
+  const heroEvent = events[events.length - 1]
+  const featuredEvents = events.slice(0, 3)
+  const totalAvailableSeats = events.reduce((s, e) => s + e.availableSeats, 0)
+  const venues = venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
 
   return (
     <>
@@ -87,8 +101,8 @@ export function HomePage() {
 
             {/* Stat row */}
             <div className="mt-10 flex flex-wrap gap-3">
-              <StatPill value={String(EVENTS.length)} label="shows on sale" />
-              <StatPill value={totalSeats.toLocaleString()} label="seats available" />
+              <StatPill value={String(totalShows)} label="shows on sale" />
+              <StatPill value={totalAvailableSeats.toLocaleString()} label="seats available" />
               <StatPill value="<1s" label="seat-sync time" />
             </div>
           </div>
@@ -99,34 +113,41 @@ export function HomePage() {
             <div className="absolute inset-x-4 top-3 h-full rounded-[var(--radius-card)] bg-ink/10" />
             <div className="absolute inset-x-2 top-1.5 h-full rounded-[var(--radius-card)] bg-ink/6" />
 
-            <TicketStub
-              eyebrow={formatStubDate(heroEvent.date)}
-              title={heroEvent.artist}
-              subtitle={heroEvent.title}
-              fields={[
-                { label: 'Venue', value: heroEvent.venue.name },
-                { label: 'From', value: formatPrice(heroEvent.basePrice) },
-                { label: 'Seats', value: `${heroEvent.availableSeats} left` },
-              ]}
-              serial={`ENC-${heroEvent.id.slice(-4).toUpperCase()}`}
-              onClick={() => navigate(`/events/${heroEvent.id}`)}
-              className="relative w-full max-w-sm"
-            />
+            {eventsState.status === 'loading' && <Spinner label="Loading shows…" className="relative w-full" />}
+            {eventsState.status === 'error' && (
+              <ErrorState
+                description={eventsState.error.message}
+                onRetry={eventsState.retry}
+                className="relative w-full"
+              />
+            )}
+            {eventsState.status === 'empty' && (
+              <EmptyState title="No shows on sale yet" className="relative w-full" />
+            )}
+            {eventsState.status === 'success' && heroEvent && (
+              <>
+                <TicketStub
+                  eyebrow={formatStubDate(heroEvent.date)}
+                  title={heroEvent.artist}
+                  subtitle={heroEvent.title}
+                  fields={[
+                    { label: 'Venue', value: heroEvent.venue.name },
+                    { label: 'From', value: formatPrice(heroEvent.basePrice) },
+                    { label: 'Seats', value: `${heroEvent.availableSeats} left` },
+                  ]}
+                  serial={`ENC-${heroEvent.id.slice(-4).toUpperCase()}`}
+                  onClick={() => navigate(`/events/${heroEvent.id}`)}
+                  className="relative w-full max-w-sm"
+                />
 
-            {/* Live indicator below stub */}
-            <div className="mt-3 flex items-center gap-2 text-[12px] text-text-muted">
-              <PulseDot />
-              <span>Seat map updating live</span>
-              <Radio className="size-3 text-stage-green" />
-            </div>
-
-            {/* Floating seat-taken notification */}
-            <div className="mt-4 flex items-center gap-2.5 rounded-[var(--radius)] border-[0.5px] border-border bg-card px-4 py-2.5 shadow-[var(--shadow-lift)]">
-              <span className="size-2 rounded-full bg-seat-taken" aria-hidden />
-              <p className="font-mono text-[12px] text-text-secondary">
-                Seat D-7 just taken by another fan
-              </p>
-            </div>
+                {/* Live indicator below stub */}
+                <div className="mt-3 flex items-center gap-2 text-[12px] text-text-muted">
+                  <PulseDot />
+                  <span>Seat map updating live</span>
+                  <Radio className="size-3 text-stage-green" />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -159,7 +180,7 @@ export function HomePage() {
                 step: '03',
                 icon: Clock,
                 title: 'Get your stub',
-                body: "Confirm with the test card and your printed ticket stub appears instantly. One stub per seat, with section, row, and a real barcode. That's your ticket.",
+                body: "Confirm with Stripe test-mode payment and your printed ticket stub appears once it's confirmed. One stub per seat, with section, row, and a real barcode. That's your ticket.",
               },
             ].map(({ step, icon: Icon, title, body }) => (
               <div
@@ -200,11 +221,20 @@ export function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {featuredEvents.map((e) => (
-              <EventCard key={e.id} event={e} />
-            ))}
-          </div>
+          {eventsState.status === 'loading' && <Spinner label="Loading shows…" />}
+          {eventsState.status === 'error' && (
+            <ErrorState description={eventsState.error.message} onRetry={eventsState.retry} />
+          )}
+          {eventsState.status === 'empty' && (
+            <EmptyState title="No shows on sale yet" description="Check back soon." />
+          )}
+          {eventsState.status === 'success' && (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {featuredEvents.map((e) => (
+                <EventCard key={e.id} event={e} />
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -240,24 +270,26 @@ export function HomePage() {
             </div>
 
             {/* Stacked stubs */}
-            <div className="relative flex flex-col gap-3 lg:pl-6">
-              {EVENTS.slice(0, 3).map((evt, i) => (
-                <div
-                  key={evt.id}
-                  className="transition-transform duration-200 hover:-translate-y-1"
-                  style={{ zIndex: 3 - i }}
-                >
-                  <TicketStub
-                    variant="compact"
-                    eyebrow={formatStubDate(evt.date)}
-                    title={evt.artist}
-                    subtitle={`${evt.venue.name} · ${evt.venue.city}`}
-                    serial={`ENC-${evt.id.slice(-4).toUpperCase()}`}
-                    onClick={() => navigate(`/events/${evt.id}`)}
-                  />
-                </div>
-              ))}
-            </div>
+            {eventsState.status === 'success' && (
+              <div className="relative flex flex-col gap-3 lg:pl-6">
+                {featuredEvents.map((evt, i) => (
+                  <div
+                    key={evt.id}
+                    className="transition-transform duration-200 hover:-translate-y-1"
+                    style={{ zIndex: 3 - i }}
+                  >
+                    <TicketStub
+                      variant="compact"
+                      eyebrow={formatStubDate(evt.date)}
+                      title={evt.artist}
+                      subtitle={`${evt.venue.name} · ${evt.venue.city}`}
+                      serial={`ENC-${evt.id.slice(-4).toUpperCase()}`}
+                      onClick={() => navigate(`/events/${evt.id}`)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -292,19 +324,15 @@ export function HomePage() {
           </div>
 
           {/* Venue list */}
-          <div className="mt-12 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-            {[
-              'The Half Moon · London',
-              'Corn Exchange · Bristol',
-              "St. George’s · Bristol",
-              'Electric Ballroom · London',
-              'Union Chapel · London',
-            ].map((v) => (
-              <span key={v} className="font-mono text-[11px] text-ticket-paper/30 uppercase tracking-wider">
-                {v}
-              </span>
-            ))}
-          </div>
+          {venues.length > 0 && (
+            <div className="mt-12 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+              {venues.map((v) => (
+                <span key={v.id} className="font-mono text-[11px] text-ticket-paper/30 uppercase tracking-wider">
+                  {v.name} · {v.city}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </>

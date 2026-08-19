@@ -1,10 +1,10 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Ticket, LayoutDashboard, CalendarDays, BookOpen, MapPin, LogOut, ChevronRight } from 'lucide-react'
-import { useStore } from '@/lib/store'
+import { useAuth } from '@/context/AuthContext'
 import { cn } from '@/lib/utils'
 
 function AdminSidebar() {
-  const { user, logout } = useStore()
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
 
   const navItem = ({ isActive }: { isActive: boolean }) =>
