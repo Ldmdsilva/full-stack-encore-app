@@ -1,9 +1,13 @@
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
+const REPO_ROOT = path.resolve(__dirname, '..');
+
 /**
- * System / E2E config (Phase 7, SRS §D4.4). Lives at the repo root — see
- * `.github/workflows/ci.yml`'s `e2e` job, which runs `npx playwright test`
- * from here on `workflow_dispatch` only (§D7: on demand / at milestones,
+ * System / E2E config (Phase 7, SRS §D4.4). Lives under QA/ at the repo
+ * root — see `.github/workflows/ci.yml`'s `e2e` job, which runs
+ * `npx playwright test --config=QA/playwright.config.ts` from the repo
+ * root on `workflow_dispatch` only (§D7: on demand / at milestones,
  * never on every push).
  *
  * Prerequisites this config assumes are already in place (it does not set
@@ -35,7 +39,11 @@ export default defineConfig({
     // override this with their own `{ timeout }`.
     timeout: 5_000,
   },
-  reporter: [['html', { open: 'never' }], ['list']],
+  // Explicit folders: reporter/output paths default to resolving against
+  // the CLI's cwd (repo root), not this config's own directory, which would
+  // otherwise leave stray report/results dirs at the repo root.
+  outputDir: path.join(__dirname, 'test-results'),
+  reporter: [['html', { open: 'never', outputFolder: path.join(__dirname, 'playwright-report') }], ['list']],
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'retain-on-failure',
@@ -55,7 +63,7 @@ export default defineConfig({
     {
       command: 'npm run dev:server',
       url: 'http://localhost:5000/api/health',
-      cwd: __dirname,
+      cwd: REPO_ROOT,
       reuseExistingServer: !process.env.CI,
       // The server awaits a MongoDB connection before it ever listens
       // (see server/src/server.js) and exits(1) if that connection fails,
@@ -70,7 +78,7 @@ export default defineConfig({
     {
       command: 'npm run dev:client',
       url: 'http://localhost:5173',
-      cwd: __dirname,
+      cwd: REPO_ROOT,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       stdout: 'pipe',

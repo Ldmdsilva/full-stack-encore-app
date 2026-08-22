@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import * as bookingsApi from '@/lib/api/bookings'
+import * as adminApi from '@/lib/api/admin'
 import { formatPrice, formatEventDate } from '@/lib/formatters'
 import { Input, Select } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -26,10 +27,18 @@ export function AdminBookingsPage() {
   const [page, setPage] = React.useState(1)
   const [search, setSearch] = React.useState('')
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all')
+  const [eventFilter, setEventFilter] = React.useState('')
 
-  const { status, data, error, retry } = useAsync(() => bookingsApi.listAll({ page, limit: PAGE_SIZE }), [page], {
-    isEmpty: (d) => d.bookings.length === 0,
-  })
+  // Event list for the filter dropdown — admin scope, so it includes
+  // cancelled/past events too (adminApi.listEvents), not the public list.
+  const { status: eventsStatus, data: eventsData } = useAsync(() => adminApi.listEvents({ limit: 100 }), [])
+  const events = eventsStatus === 'success' || eventsStatus === 'empty' ? eventsData.events : []
+
+  const { status, data, error, retry } = useAsync(
+    () => bookingsApi.listAll({ eventId: eventFilter || undefined, page, limit: PAGE_SIZE }),
+    [page, eventFilter],
+    { isEmpty: (d) => d.bookings.length === 0 },
+  )
 
   const bookings = status === 'success' || status === 'empty' ? data.bookings : []
 
@@ -47,7 +56,12 @@ export function AdminBookingsPage() {
     .filter((b) => b.status === 'confirmed')
     .reduce((s, b) => s + b.totalPrice, 0)
 
-  const hasFilters = search || statusFilter !== 'all'
+  const hasFilters = search || statusFilter !== 'all' || eventFilter
+
+  const changeEventFilter = (value: string) => {
+    setEventFilter(value)
+    setPage(1)
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -74,6 +88,19 @@ export function AdminBookingsPage() {
           />
         </div>
         <Select
+          label="Event"
+          value={eventFilter}
+          onChange={(e) => changeEventFilter(e.target.value)}
+          className="w-48"
+        >
+          <option value="">All events</option>
+          {events.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.title}
+            </option>
+          ))}
+        </Select>
+        <Select
           label="Status"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
@@ -92,6 +119,7 @@ export function AdminBookingsPage() {
             onClick={() => {
               setSearch('')
               setStatusFilter('all')
+              changeEventFilter('')
             }}
             className="shrink-0"
           >

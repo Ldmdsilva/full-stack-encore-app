@@ -78,4 +78,21 @@ The concurrency test (`tests/concurrency/booking.concurrency.test.js`, D4.3) ass
 | `tsc --noEmit` errors | n/a (JavaScript, ADR-008) | 0 |
 | Test suites / tests (server) | 19 / 154, all passing | — |
 
-**Honest framing for the report's Evaluation section:** both sides of the codebase are lint-clean (bar five accepted Fast Refresh advisories) and type-clean, and the server's coverage gates — set deliberately non-uniformly (global 70%, services 85%, the concurrency-critical `bookingService.js` at 90%, `middleware/auth.js` at 100% branch) per SRS §D3 — are met everywhere they are enforced. The client Vitest suite (§D4.7, 60% coverage gate) and the Playwright system/E2E suite (§D4.4, six journeys) exist as of this report; their own coverage numbers and journey-pass status should be captured in the same reproduction pass, immediately before submission, since — unlike the numbers above — they were not re-verified as part of this specific document revision.
+**Honest framing for the report's Evaluation section:** both sides of the codebase are lint-clean (bar five accepted Fast Refresh advisories) and type-clean, and the server's coverage gates — set deliberately non-uniformly (global 70%, services 85%, the concurrency-critical `bookingService.js` at 90%, `middleware/auth.js` at 100% branch) per SRS §D3 — are met everywhere they are enforced.
+
+## 6. Client test suite (`npx vitest run --coverage`)
+
+**Result: 39 suites, 150 tests, all passing. Coverage clears the 60% gate on every metric.**
+
+| Metric | Gate | Actual |
+|---|---|---|
+| Lines | 60% | 82.59% |
+| Statements | 60% | 80.51% |
+| Branches | 60% | 77.78% |
+| Functions | 60% | 76.21% |
+
+A six-agent audit pass against the plan surfaced and this report's authors then fixed three real, small defects the suite caught: `LoginPage.tsx` and `ProfilePage.tsx` were missing `noValidate` on their `<form>` elements, so native HTML5 constraint validation (from `required`/`type="email"` attributes) silently intercepted `onSubmit` before the pages' own inline-error validators ever ran — a genuine, if narrow, app bug the tests correctly caught, not a test-authoring mistake. Both are fixed. A fourth failure (`EventListPage`'s empty-state test) was a timing flake — its 300ms filter debounce plus refetch occasionally exceeded RTL's default 1000ms `findBy` timeout under full-suite, coverage-instrumented load; given the same 2000ms timeout already used elsewhere in that file resolves it, and it fails only under full-suite load, this was timing headroom, not a functional defect.
+
+## 7. Playwright E2E suite
+
+Six spec files exist under `QA/e2e/`, one per SRS §D4.4 journey, enumerating 8 tests via `npx playwright test --list --config=QA/playwright.config.ts`. They type-check cleanly and are structurally verified, but could not be run live in this environment — no real MongoDB or Stripe test-mode credentials are available in this sandbox, and `bookingService.createBooking` genuinely calls the live Stripe API to open a seat hold, so most journeys require both before they can execute. Run this suite for real, on demand and at the next milestone, with real credentials configured.

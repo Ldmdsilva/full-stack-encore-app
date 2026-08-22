@@ -56,7 +56,6 @@ Open `server/.env` and fill in:
 | `MONGODB_URI` | §1 above | **Yes** |
 | `JWT_SECRET` | Any long random string (`openssl rand -hex 32`) | **Yes** |
 | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` | [Stripe Dashboard → Developers → API keys](https://dashboard.stripe.com/test/apikeys) (test mode) | **Yes** — booking creation calls Stripe immediately |
-| `STRIPE_WEBHOOK_SECRET` | Output of `stripe listen` (§6) | **Yes, to ever see a booking confirm** — without it, payments succeed on Stripe but the booking never leaves `pending` (see [Troubleshooting](#troubleshooting)) |
 | `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS` | Your provider, or **leave blank** | No — an Ethereal test account is created automatically in development, and its preview URL is logged to the console on every send |
 | `NOTIFYLK_USER_ID`, `NOTIFYLK_API_KEY` | [notify.lk](https://notify.lk) account | No — leave blank or set `SMS_ENABLED=false`; SMS sends are logged and skipped, never fail a request |
 | `HOLD_TTL_MINUTES` | Default `10` is fine | No |
@@ -94,20 +93,16 @@ Use the admin login to reach `/admin`; use any customer login (or register your 
 
 ## 6. Forward Stripe webhooks (local development)
 
-Booking confirmation is **webhook-driven, not client-driven** (ADR-011) — the server only ever marks a booking `confirmed` when it receives a signed event from Stripe, never as a direct result of the checkout request. Locally, that means Stripe needs somewhere to deliver events to, which your laptop isn't unless you forward them:
+Booking confirmation is **webhook-driven, not client-driven** (ADR-011) — the server only ever marks a booking `confirmed` when it receives an event from Stripe, never as a direct result of the checkout request. Locally, that means Stripe needs somewhere to deliver events to, which your laptop isn't unless you forward them:
 
 ```bash
 stripe login          # once, opens a browser to link your Stripe account
 stripe listen --forward-to localhost:5000/api/payments/webhook
 ```
 
-This prints a line like:
+Leave this terminal running for the whole session — every payment event flows through it.
 
-```
-Ready! Your webhook signing secret is whsec_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX (^C to quit)
-```
-
-Copy that `whsec_…` value into `server/.env` as `STRIPE_WEBHOOK_SECRET`, then (re)start the server. Leave this terminal running for the whole session — every payment event flows through it.
+> **Note:** this deployment has no `STRIPE_WEBHOOK_SECRET` configured, so incoming webhook payloads are trusted as-is rather than verified against Stripe's signature header. That's fine for local development against your own Stripe test account, but it means the `/api/payments/webhook` endpoint will accept a forged "payment succeeded" event from anyone who can reach it — do not expose it publicly without adding signature verification back.
 
 ## 7. Run it
 
@@ -147,10 +142,9 @@ Webhook forwarding (§6) still applies when running in Docker — point `stripe 
 ## Troubleshooting
 
 **My booking is stuck on "Confirming payment…" / stays `pending` forever, even though Stripe shows the payment succeeded.**
-This is almost always a missing or stale `STRIPE_WEBHOOK_SECRET`. The booking is only confirmed when the server receives and verifies a webhook event (ADR-011) — the client's own "payment succeeded" callback is deliberately never trusted for this. Check:
+This is almost always a missing webhook delivery. The booking is only confirmed when the server receives a webhook event (ADR-011) — the client's own "payment succeeded" callback is deliberately never trusted for this. Check:
 1. Is `stripe listen --forward-to localhost:5000/api/payments/webhook` actually running?
-2. Does `server/.env`'s `STRIPE_WEBHOOK_SECRET` match the `whsec_…` value that `stripe listen` printed *this session* (it changes each time you restart `stripe listen` unless you use a fixed CLI-generated webhook endpoint)?
-3. Did you restart the server after changing `STRIPE_WEBHOOK_SECRET`?
+2. Is the server actually receiving the forwarded requests (check its logs)?
 
 It looks like a bug — it isn't. It's the intended failure mode of a webhook-authoritative design with no webhook delivered.
 

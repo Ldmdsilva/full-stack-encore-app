@@ -87,7 +87,7 @@ export function ProfilePage() {
           <User className="size-4 text-text-muted" />
           Personal details
         </h2>
-        <form onSubmit={saveProfile} className="mt-5 flex flex-col gap-4">
+        <form onSubmit={saveProfile} noValidate className="mt-5 flex flex-col gap-4">
           <Input
             label="Full name"
             value={name}

@@ -23,7 +23,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return result;
 }
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const serverEnv = parseEnvFile(path.join(REPO_ROOT, 'server', '.env'));
 const clientEnv = parseEnvFile(path.join(REPO_ROOT, 'client', '.env'));
 
@@ -45,12 +45,11 @@ export function isStripeConfigured(): boolean {
 
 /**
  * True when the developer running the suite has told us a `stripe listen`
- * process is actively forwarding webhooks to the local server (and that
- * server/.env's STRIPE_WEBHOOK_SECRET is the matching `whsec_...` value
- * that `stripe listen` printed). There is no reliable way to detect this
- * automatically from inside a test, so it's an opt-in env var rather than
- * inferred — see the plan's note that a fully automated "pay" step in a
- * CI-less local run needs either a running forwarder or a tolerant test.
+ * process is actively forwarding webhooks to the local server. There is no
+ * reliable way to detect this automatically from inside a test, so it's an
+ * opt-in env var rather than inferred — see the plan's note that a fully
+ * automated "pay" step in a CI-less local run needs either a running
+ * forwarder or a tolerant test.
  */
 export function isWebhookForwardingAvailable(): boolean {
   return process.env.E2E_STRIPE_WEBHOOK_FORWARDING === '1';

@@ -34,7 +34,9 @@ export async function sendSms(to, message) {
     const response = await fetch(NOTIFYLK_ENDPOINT, { method: 'POST', body });
     const data = await response.json().catch(() => null);
 
-    if (!response.ok || data?.status !== 'success') {
+    // Success is exactly { status: 'success', data: 'Sent' } — any other body
+    // (or a non-2xx) is a failure, logged and never thrown.
+    if (!response.ok || data?.status !== 'success' || data?.data !== 'Sent') {
       logger.warn({ to, httpStatus: response.status, data }, '[SMS] notify.lk send failed');
     }
 

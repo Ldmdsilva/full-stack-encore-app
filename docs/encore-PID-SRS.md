@@ -740,7 +740,7 @@ Against that: **the atomic conditional seat-update mechanism itself is unchanged
 ### Action items
 1. [ ] Alert on the hold-reaper process being unreachable/not running (§A11).
 2. [ ] Confirm every state transition off `pending` uses a guarded conditional update, never an unconditional `save()`.
-3. [ ] Document `HOLD_TTL_MINUTES` and the "why is my booking stuck pending" failure mode in the README (missing `STRIPE_WEBHOOK_SECRET` in local dev is the most likely cause).
+3. [ ] Document `HOLD_TTL_MINUTES` and the "why is my booking stuck pending" failure mode in the README (a `stripe listen` forwarder not running in local dev is the most likely cause).
 
 ---
 
@@ -805,7 +805,9 @@ Once a card payment completes in the browser, the client's Stripe integration re
 
 **Option B — Webhook-authoritative confirmation (chosen)**
 
-**Pros:** Stripe's webhook is delivered by Stripe's own infrastructure, independently of anything the client does after payment; it is cryptographically signed with `STRIPE_WEBHOOK_SECRET`, so a forged delivery is detectable and rejected (400 `INVALID_SIGNATURE`); it fires even if the customer's browser crashes, closes, or loses connectivity immediately after paying, because Stripe retries delivery until it is acknowledged. This makes it the only source of truth the server can actually stand behind.
+**Pros:** Stripe's webhook is delivered by Stripe's own infrastructure, independently of anything the client does after payment; when signed with `STRIPE_WEBHOOK_SECRET`, a forged delivery is detectable and rejected (400 `INVALID_SIGNATURE`); it fires even if the customer's browser crashes, closes, or loses connectivity immediately after paying, because Stripe retries delivery until it is acknowledged. This makes it the only source of truth the server can actually stand behind.
+
+> **Current deviation:** this deployment has no `STRIPE_WEBHOOK_SECRET`, so `verifyWebhookSignature` (server/src/services/paymentService.js) parses the payload without checking Stripe's signature header. The webhook-vs-client-callback trust decision below still holds — the client is never trusted — but the webhook endpoint itself is currently unauthenticated, so anyone who can reach `/api/payments/webhook` could forge a confirmation event. Fine for local development against a private Stripe test account; re-add signature verification before any shared or public deployment.
 **Cons:** confirmation is not instantaneous from the client's point of view — there is a real, if usually sub-second, gap between "Stripe says payment succeeded" in the browser and the webhook landing at `/api/payments/webhook`. The confirmation page has to show an honest "confirming payment…" state for that gap (Phase 5 spec) rather than assuming success immediately.
 
 ### Trade-off analysis

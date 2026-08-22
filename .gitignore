@@ -4,8 +4,8 @@
 # convenience scripts.
 node_modules/
 
-# Playwright artifacts (e2e/, playwright.config.ts)
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
+# Playwright artifacts (QA/e2e/, QA/playwright.config.ts)
+/QA/test-results/
+/QA/playwright-report/
+/QA/blob-report/
+/QA/playwright/.cache/

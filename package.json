@@ -15,7 +15,7 @@
     "lint:client": "npm --prefix client run lint",
     "typecheck": "npm --prefix client run typecheck",
     "build": "npm --prefix client run build",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test --config=QA/playwright.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1"

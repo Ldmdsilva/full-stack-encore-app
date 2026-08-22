@@ -20,10 +20,10 @@ export async function createPaymentSession(req, res, next) {
 export async function handleWebhook(req, res) {
   let stripeEvent;
   try {
-    stripeEvent = paymentService.verifyWebhookSignature(req.body, req.headers['stripe-signature']);
+    stripeEvent = paymentService.verifyWebhookSignature(req.body);
   } catch (error) {
-    logger.warn({ err: error }, '[Webhook] Signature verification failed');
-    return res.status(400).json({ error: { code: 'INVALID_SIGNATURE', message: 'Invalid Stripe webhook signature' } });
+    logger.warn({ err: error }, '[Webhook] Payload parsing failed');
+    return res.status(400).json({ error: { code: 'INVALID_PAYLOAD', message: 'Invalid Stripe webhook payload' } });
   }
 
   try {

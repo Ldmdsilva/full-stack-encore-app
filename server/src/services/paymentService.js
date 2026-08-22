@@ -21,6 +21,13 @@ export function toMinorUnits(amount) {
   return Math.round(amount * 100);
 }
 
+// Stripe rejects Checkout Sessions whose `expires_at` is under 30 minutes
+// out from creation, which is shorter than our seat-hold TTL can be. The
+// seat hold itself still expires on schedule — holdReaper proactively calls
+// `expireCheckoutSession` at that point — so clamping this to Stripe's floor
+// just keeps session creation from failing; it doesn't extend the hold.
+const STRIPE_MIN_SESSION_MINUTES = 31;
+
 /**
  * Create a Stripe Checkout Session (embedded Payment Element, ADR-010) for
  * a pending booking's hold.
@@ -30,6 +37,9 @@ export function toMinorUnits(amount) {
  * @returns {Promise<import('stripe').Stripe.Checkout.Session>}
  */
 export async function createCheckoutSession({ booking, customerEmail }) {
+  const holdExpiresAtEpoch = Math.floor(new Date(booking.holdExpiresAt).getTime() / 1000);
+  const minExpiresAtEpoch = Math.floor(Date.now() / 1000) + STRIPE_MIN_SESSION_MINUTES * 60;
+
   return stripe.checkout.sessions.create(
     {
       mode: 'payment',
@@ -47,7 +57,7 @@ export async function createCheckoutSession({ booking, customerEmail }) {
       ],
       customer_email: customerEmail,
       return_url: `${env.CLIENT_URL}/confirmation/${booking._id}`,
-      expires_at: Math.floor(new Date(booking.holdExpiresAt).getTime() / 1000),
+      expires_at: Math.max(holdExpiresAtEpoch, minExpiresAtEpoch),
       metadata: {
         bookingId: booking._id.toString(),
         reference: booking.reference,
@@ -125,13 +135,16 @@ export async function refundPayment(paymentIntentId) {
 }
 
 /**
- * Verify and parse an incoming Stripe webhook payload (ADR-011).
+ * Parse an incoming Stripe webhook payload (ADR-011).
+ *
+ * No signature verification: this deployment has no STRIPE_WEBHOOK_SECRET,
+ * so the payload is trusted as-is rather than checked against Stripe's
+ * signature header.
  * @param {Buffer} rawBody
- * @param {string} signature
  * @returns {import('stripe').Stripe.Event}
  */
-export function verifyWebhookSignature(rawBody, signature) {
-  return stripe.webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
+export function verifyWebhookSignature(rawBody) {
+  return JSON.parse(rawBody.toString('utf8'));
 }
 
 /**

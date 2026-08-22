@@ -144,7 +144,7 @@ export function LoginPage() {
           </button>
         </div>
 
-        <form onSubmit={submit} className="flex flex-col gap-4 p-6">
+        <form onSubmit={submit} noValidate className="flex flex-col gap-4 p-6">
           {mode === 'register' && (
             <Input
               label="Full name"

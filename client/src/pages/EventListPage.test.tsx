@@ -43,11 +43,15 @@ describe('EventListPage', () => {
 
     await user.selectOptions(screen.getByLabelText(/genre/i), 'Synth-pop')
 
-    expect(await screen.findByText(/no concerts match your search/i)).toBeInTheDocument()
+    // The 300ms filter debounce plus a refetch can occasionally exceed RTL's
+    // default 1000ms findBy timeout under a coverage-instrumented full-suite
+    // run, so this one gets the same longer timeout as the debounce-driven
+    // wait below.
+    expect(await screen.findByText(/no concerts match your search/i, {}, { timeout: 2000 })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /clear filters/i }))
-    expect(await screen.findByText(/phoebe wren/i)).toBeInTheDocument()
+    expect(await screen.findByText(/phoebe wren/i, {}, { timeout: 2000 })).toBeInTheDocument()
   })
 
   it('reflects filter changes in the URL so a search is shareable', async () => {
