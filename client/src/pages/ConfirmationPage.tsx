@@ -8,6 +8,7 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { useSocket } from '@/context/SocketContext'
 import { useAsync } from '@/hooks/useAsync'
 import * as bookingsApi from '@/lib/api/bookings'
+import * as paymentsApi from '@/lib/api/payments'
 import { formatPrice, formatStubDate } from '@/lib/formatters'
 import type { Booking, BookingUpdatedPayload } from '@/lib/types'
 
@@ -24,13 +25,17 @@ export function ConfirmationPage() {
     [bookingId],
   )
 
-  // The booking is `pending` until the Stripe webhook confirms payment —
-  // that can land after this page has already mounted. Listen on the
-  // socket, and poll as a fallback in case the socket is down (§FR-16-ish).
-  // `booking` is adjusted during render (React's documented alternative to
-  // an effect that only mirrors another value) whenever the fetch produces
-  // a new booking object; the socket/poll effect below then owns further
-  // updates to it via setBooking directly.
+  // The booking is `pending` until its payment is confirmed — that can
+  // land after this page has already mounted. There's no Stripe webhook in
+  // this deployment, so confirmation is driven from here instead: each
+  // check below calls `confirmPayment`, which reconciles the booking
+  // against its own Checkout Session directly on Stripe (via the secret
+  // key) and flips it to `confirmed` server-side if it's been paid. Listen
+  // on the socket for a push, and poll as a fallback in case the socket is
+  // down (§FR-16-ish). `booking` is adjusted during render (React's
+  // documented alternative to an effect that only mirrors another value)
+  // whenever the fetch produces a new booking object; the socket/poll
+  // effect below then owns further updates to it via setBooking directly.
   const [booking, setBooking] = React.useState<Booking | null>(null)
   const [syncedFrom, setSyncedFrom] = React.useState<Booking | null>(null)
   if (status === 'success' && data.booking !== syncedFrom) {
@@ -44,7 +49,7 @@ export function ConfirmationPage() {
 
     function handleBookingUpdated(payload: BookingUpdatedPayload) {
       if (payload.bookingId !== id) return
-      bookingsApi.getById(id).then(({ booking: fresh }) => setBooking(fresh))
+      paymentsApi.confirmPayment(id).then(({ booking: fresh }) => setBooking(fresh))
     }
     socket.on('booking:updated', handleBookingUpdated)
 
@@ -55,7 +60,7 @@ export function ConfirmationPage() {
         return
       }
       try {
-        const { booking: fresh } = await bookingsApi.getById(id)
+        const { booking: fresh } = await paymentsApi.confirmPayment(id)
         setBooking(fresh)
         if (fresh.status !== 'pending') clearInterval(interval)
       } catch {

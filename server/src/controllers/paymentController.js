@@ -1,4 +1,5 @@
 import * as paymentService from '../services/paymentService.js';
+import { serializeBooking } from '../serializers/bookingSerializer.js';
 import { logger } from '../config/logger.js';
 
 export async function createPaymentSession(req, res, next) {
@@ -8,6 +9,24 @@ export async function createPaymentSession(req, res, next) {
       userId: req.user.id,
     });
     return res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Reconcile a booking's payment status directly against Stripe (no webhook
+ * required) — called by the client in place of a passive booking-status
+ * poll while a checkout is `pending`.
+ */
+export async function confirmPayment(req, res, next) {
+  try {
+    const booking = await paymentService.reconcileCheckoutSession({
+      bookingId: req.params.id,
+      userId: req.user.id,
+      role: req.user.role,
+    });
+    return res.status(200).json({ booking: serializeBooking(booking) });
   } catch (error) {
     next(error);
   }

@@ -14,6 +14,7 @@ router.post('/', verifyToken, bookingLimiter, validate(createBookingSchema), boo
 router.get('/me', verifyToken, bookingController.getMyBookings);
 router.get('/:id', verifyToken, bookingController.getBookingById);
 router.post('/:id/payment-session', verifyToken, paymentController.createPaymentSession);
+router.post('/:id/confirm-payment', verifyToken, paymentController.confirmPayment);
 router.patch('/:id/cancel', verifyToken, bookingController.cancelBooking);
 
 // Admin-only booking management (FR-24, FR-25)

@@ -114,6 +114,53 @@ export async function createPaymentSessionForBooking({ bookingId, userId }) {
 }
 
 /**
+ * Reconcile a booking's payment status directly against Stripe instead of
+ * waiting on a webhook: retrieves the booking's own Checkout Session by id
+ * and, if Stripe reports it paid, runs the same confirmation path
+ * `handleCheckoutCompleted` would have run. Safe to call repeatedly —
+ * `confirmPendingBooking` only acts while the booking is still `pending`,
+ * so the client can poll this in place of a passive status read.
+ * @param {object} params
+ * @param {string} params.bookingId
+ * @param {string} params.userId
+ * @param {string} params.role
+ * @returns {Promise<object>} the booking, current as of this call
+ */
+export async function reconcileCheckoutSession({ bookingId, userId, role }) {
+  const populateOptions = [
+    { path: 'userRef', select: 'name email' },
+    { path: 'eventRef', select: 'title artist date venueRef status' },
+  ];
+
+  let booking = await Booking.findById(bookingId).populate(populateOptions);
+  if (!booking) {
+    throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+  }
+  if (role !== 'admin' && booking.userRef?._id?.toString() !== userId.toString()) {
+    throw new AppError('Forbidden: you can only view your own bookings', 403, 'FORBIDDEN');
+  }
+
+  const sessionId = booking.payment?.sessionId;
+  if (booking.status === 'pending' && sessionId) {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['payment_intent'] });
+
+    if (session.payment_status === 'paid') {
+      const paymentIntentId =
+        typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
+      await confirmPendingBooking(bookingId, {
+        'payment.sessionId': session.id,
+        'payment.paymentIntentId': paymentIntentId,
+        'payment.amountMinor': session.amount_total,
+        'payment.currency': session.currency,
+      });
+      booking = await Booking.findById(bookingId).populate(populateOptions);
+    }
+  }
+
+  return booking;
+}
+
+/**
  * Expire a live Stripe Checkout Session; a no-op if it is already gone.
  * @param {string} [sessionId]
  */
