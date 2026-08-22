@@ -182,16 +182,15 @@ export async function refundPayment(paymentIntentId) {
 }
 
 /**
- * Parse an incoming Stripe webhook payload (ADR-011).
- *
- * No signature verification: this deployment has no STRIPE_WEBHOOK_SECRET,
- * so the payload is trusted as-is rather than checked against Stripe's
- * signature header.
+ * Verify and parse an incoming Stripe webhook payload (ADR-011) against its
+ * `stripe-signature` header, so a forged request can't confirm/expire a
+ * booking on our behalf.
  * @param {Buffer} rawBody
+ * @param {string} signature - the `stripe-signature` request header
  * @returns {import('stripe').Stripe.Event}
  */
-export function verifyWebhookSignature(rawBody) {
-  return JSON.parse(rawBody.toString('utf8'));
+export function verifyWebhookSignature(rawBody, signature) {
+  return stripe.webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
 }
 
 /**
