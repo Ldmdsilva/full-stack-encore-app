@@ -27,7 +27,8 @@ import { jest } from '@jest/globals';
 /**
  * Build a fake Stripe client covering the surface `paymentService.js`
  * actually calls: `checkout.sessions.create`, `checkout.sessions.expire`,
- * `refunds.create`, `webhooks.constructEvent`, `webhooks.generateTestHeaderString`.
+ * `checkout.sessions.retrieve`, `refunds.create`, `webhooks.constructEvent`,
+ * `webhooks.generateTestHeaderString`.
  * @param {object} [overrides] - deep-merged onto the default mock's leaf functions
  * @returns {object}
  */
@@ -43,6 +44,14 @@ export function createStripeMock(overrides = {}) {
           currency: 'lkr',
         })),
         expire: jest.fn(async (id) => ({ id, status: 'expired' })),
+        retrieve: jest.fn(async (id) => ({
+          id,
+          status: 'open',
+          payment_status: 'unpaid',
+          amount_total: 0,
+          currency: 'lkr',
+          payment_intent: null,
+        })),
       },
     },
     refunds: {

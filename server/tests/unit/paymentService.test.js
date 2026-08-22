@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, jest } from '@jest/globals';
+import mongoose from 'mongoose';
 import { connectTestDB, clearTestDB, closeTestDB } from '../helpers/db.js';
 import { createStripeMock, mockStripeModule } from '../helpers/mocks.js';
 import Event from '../../src/models/Event.js';
@@ -158,6 +159,173 @@ describe('services/paymentService.js (Phase 2, ADR-010, ADR-011)', () => {
       await expect(
         paymentService.createPaymentSessionForBooking({ bookingId: booking._id.toString(), userId: user._id.toString() })
       ).rejects.toMatchObject({ statusCode: 409, code: 'BOOKING_NOT_PENDING' });
+    });
+  });
+
+  describe('reconcileCheckoutSession', () => {
+    it('rejects with 404 BOOKING_NOT_FOUND when the booking does not exist', async () => {
+      await expect(
+        paymentService.reconcileCheckoutSession({
+          bookingId: new mongoose.Types.ObjectId().toString(),
+          userId: new mongoose.Types.ObjectId().toString(),
+          role: 'customer',
+        })
+      ).rejects.toMatchObject({ statusCode: 404, code: 'BOOKING_NOT_FOUND' });
+      expect(stripeMock.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 403 FORBIDDEN when the requester is not the booking owner', async () => {
+      const owner = await User.create({
+        name: 'Owner',
+        email: 'owner@test.com',
+        passwordHash: 'hash',
+        phone: '94771234567',
+        role: 'customer',
+      });
+      const booking = await Booking.create({
+        reference: 'ENC-FORBID1',
+        userRef: owner._id,
+        eventRef: new mongoose.Types.ObjectId(),
+        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
+        totalPrice: 50,
+        status: 'pending',
+        holdExpiresAt: new Date(Date.now() + 600000),
+        payment: { provider: 'stripe', sessionId: 'cs_test_forbidden' },
+      });
+
+      await expect(
+        paymentService.reconcileCheckoutSession({
+          bookingId: booking._id.toString(),
+          userId: new mongoose.Types.ObjectId().toString(),
+          role: 'customer',
+        })
+      ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+      expect(stripeMock.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('returns the booking as-is without contacting Stripe once it is no longer pending', async () => {
+      const user = await User.create({
+        name: 'Already Confirmed',
+        email: 'already-confirmed@test.com',
+        passwordHash: 'hash',
+        phone: '94771234567',
+        role: 'customer',
+      });
+      const booking = await Booking.create({
+        reference: 'ENC-DONE0001',
+        userRef: user._id,
+        eventRef: new mongoose.Types.ObjectId(),
+        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
+        totalPrice: 50,
+        status: 'confirmed',
+        payment: { provider: 'stripe', sessionId: 'cs_test_already_confirmed', status: 'succeeded' },
+      });
+
+      const result = await paymentService.reconcileCheckoutSession({
+        bookingId: booking._id.toString(),
+        userId: user._id.toString(),
+        role: 'customer',
+      });
+
+      expect(result.status).toBe('confirmed');
+      expect(stripeMock.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('leaves a pending booking unconfirmed when Stripe reports the session unpaid', async () => {
+      const user = await User.create({
+        name: 'Still Paying',
+        email: 'still-paying@test.com',
+        passwordHash: 'hash',
+        phone: '94771234567',
+        role: 'customer',
+      });
+      const booking = await Booking.create({
+        reference: 'ENC-UNPAID01',
+        userRef: user._id,
+        eventRef: new mongoose.Types.ObjectId(),
+        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
+        totalPrice: 50,
+        status: 'pending',
+        holdExpiresAt: new Date(Date.now() + 600000),
+        payment: { provider: 'stripe', sessionId: 'cs_test_unpaid' },
+      });
+      stripeMock.checkout.sessions.retrieve.mockResolvedValueOnce({
+        id: 'cs_test_unpaid',
+        payment_status: 'unpaid',
+      });
+
+      const result = await paymentService.reconcileCheckoutSession({
+        bookingId: booking._id.toString(),
+        userId: user._id.toString(),
+        role: 'customer',
+      });
+
+      expect(stripeMock.checkout.sessions.retrieve).toHaveBeenCalledWith('cs_test_unpaid', {
+        expand: ['payment_intent'],
+      });
+      expect(result.status).toBe('pending');
+    });
+
+    it('confirms the booking and releases the held seat when Stripe reports the session paid', async () => {
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ status: 'success', data: 'Sent' }) }));
+
+      const venue = await Venue.create({
+        name: 'Reconcile Hall',
+        address: '1 Reconcile Ave',
+        city: 'Colombo',
+        seatLayout: [{ id: 'A-1', section: 'Main', row: 'A', number: 1 }],
+        capacity: 1,
+      });
+      const event = await Event.create({
+        title: 'Reconcile Event',
+        artist: 'Test Artist',
+        genre: 'Rock',
+        date: new Date(Date.now() + 86400000),
+        basePrice: 50,
+        venueRef: venue._id,
+        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'held', price: 50 }],
+        status: 'scheduled',
+      });
+      const user = await User.create({
+        name: 'Reconcile User',
+        email: 'reconcile@test.com',
+        passwordHash: 'hash',
+        phone: '94771234567',
+        role: 'customer',
+      });
+      const booking = await Booking.create({
+        reference: 'ENC-PAID0001',
+        userRef: user._id,
+        eventRef: event._id,
+        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
+        totalPrice: 50,
+        status: 'pending',
+        holdExpiresAt: new Date(Date.now() + 600000),
+        payment: { provider: 'stripe', sessionId: 'cs_test_paid' },
+      });
+      stripeMock.checkout.sessions.retrieve.mockResolvedValueOnce({
+        id: 'cs_test_paid',
+        payment_status: 'paid',
+        payment_intent: 'pi_test_reconcile',
+        amount_total: 5000,
+        currency: 'lkr',
+      });
+
+      const result = await paymentService.reconcileCheckoutSession({
+        bookingId: booking._id.toString(),
+        userId: user._id.toString(),
+        role: 'customer',
+      });
+
+      expect(result.status).toBe('confirmed');
+      expect(result.payment.paymentIntentId).toBe('pi_test_reconcile');
+      expect(result.holdExpiresAt).toBeUndefined();
+
+      const updatedEvent = await Event.findById(event._id);
+      expect(updatedEvent.seats.find((s) => s.id === 'A-1').status).toBe('booked');
+
+      global.fetch = originalFetch;
     });
   });
 
