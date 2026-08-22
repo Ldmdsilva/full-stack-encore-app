@@ -19,6 +19,13 @@ export default defineConfig({
     setupFiles: ['./src/test/setupTests.ts'],
     css: true,
     restoreMocks: true,
+    // client.ts reads import.meta.env.VITE_API_URL with no fallback. It's
+    // normally set by the gitignored .env, which doesn't exist in CI — set
+    // it here so the MSW handlers (registered under /api/*) match requests
+    // the same way in CI as they do locally.
+    env: {
+      VITE_API_URL: '/api',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
