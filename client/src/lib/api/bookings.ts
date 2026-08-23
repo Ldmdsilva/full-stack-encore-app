@@ -7,9 +7,10 @@ export interface ListBookingsParams {
 }
 
 export interface ListBookingsResponse {
-  bookings: Booking[]
+  items: Booking[]
   total: number
   page: number
+  limit: number
   totalPages: number
 }
 

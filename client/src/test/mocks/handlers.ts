@@ -187,7 +187,7 @@ export const handlers = [
   ),
 
   http.get(`${API}/bookings/me`, () =>
-    HttpResponse.json({ bookings, total: bookings.length, page: 1, totalPages: 1 }),
+    HttpResponse.json({ items: bookings, total: bookings.length, page: 1, limit: 10, totalPages: 1 }),
   ),
 
   http.get(`${API}/bookings/:id`, ({ params }) => {
@@ -199,7 +199,7 @@ export const handlers = [
   }),
 
   http.get(`${API}/bookings`, () =>
-    HttpResponse.json({ bookings, total: bookings.length, page: 1, totalPages: 1 }),
+    HttpResponse.json({ items: bookings, total: bookings.length, page: 1, limit: 20, totalPages: 1 }),
   ),
 
   http.patch(`${API}/bookings/:id/cancel`, ({ params }) => {

@@ -45,7 +45,7 @@ export async function cancelBooking(req, res, next) {
 export async function getMyBookings(req, res, next) {
   try {
     const result = await bookingService.getUserBookings(req.user.id, req.query);
-    return res.status(200).json({ ...result, bookings: result.bookings.map(serializeBooking) });
+    return res.status(200).json({ ...result, items: result.items.map(serializeBooking) });
   } catch (error) {
     next(error);
   }
@@ -54,7 +54,7 @@ export async function getMyBookings(req, res, next) {
 export async function getAllBookings(req, res, next) {
   try {
     const result = await bookingService.getAllBookings(req.query);
-    return res.status(200).json({ ...result, bookings: result.bookings.map(serializeBooking) });
+    return res.status(200).json({ ...result, items: result.items.map(serializeBooking) });
   } catch (error) {
     next(error);
   }

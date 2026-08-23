@@ -72,13 +72,13 @@ function BookingStatusBadge({ status }: { status: BookingStatus }) {
 export function AdminDashboard() {
   const statsState = useAsync(() => adminApi.stats(), [])
   const bookingsState = useAsync(() => bookingsApi.listAll({ limit: 8 }), [], {
-    isEmpty: (d) => d.bookings.length === 0,
+    isEmpty: (d) => d.items.length === 0,
   })
   const eventsState = useAsync(() => adminApi.listEvents({ limit: 50 }), [], {
     isEmpty: (d) => d.events.length === 0,
   })
 
-  const recentBookings = bookingsState.status === 'success' ? bookingsState.data.bookings : []
+  const recentBookings = bookingsState.status === 'success' ? bookingsState.data.items : []
   const topEvents =
     eventsState.status === 'success'
       ? [...eventsState.data.events].sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 4)

@@ -320,9 +320,10 @@ describe('Encore REST API Integration Tests (§C7.1, §D4.2, ADR-008)', () => {
         .set('Authorization', `Bearer ${customerToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.bookings).toHaveLength(1);
-      expect(res.body.bookings[0].seats.map((s) => s.id)).toEqual(['B-1']);
-      expect(res.body.bookings[0].status).toBe('pending');
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].seats.map((s) => s.id)).toEqual(['B-1']);
+      expect(res.body.items[0].status).toBe('pending');
+      expect(res.body.limit).toBe(10);
     });
 
     it('PATCH /api/bookings/:id/cancel cancels a pending booking and releases its held seats (FR-19)', async () => {
@@ -407,7 +408,7 @@ describe('Encore REST API Integration Tests (§C7.1, §D4.2, ADR-008)', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('bookings');
+      expect(res.body).toHaveProperty('items');
     });
 
     it('POST /api/events returns 403 Forbidden for non-admin customer (FR-4)', async () => {

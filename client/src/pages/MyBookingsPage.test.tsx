@@ -14,7 +14,7 @@ describe('MyBookingsPage', () => {
   })
 
   it('shows an empty state with no bookings', async () => {
-    server.use(http.get('/api/bookings/me', () => HttpResponse.json({ bookings: [], total: 0, page: 1, totalPages: 1 })))
+    server.use(http.get('/api/bookings/me', () => HttpResponse.json({ items: [], total: 0, page: 1, limit: 10, totalPages: 1 })))
     renderPage(<MyBookingsPage />, '/bookings')
     expect(await screen.findByText(/haven't booked any concerts/i)).toBeInTheDocument()
   })

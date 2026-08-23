@@ -40,7 +40,7 @@ export function MyBookingsPage() {
   const { status, data, error, retry } = useAsync(
     () => bookingsApi.listMine({ page, limit: PAGE_SIZE }),
     [page],
-    { isEmpty: (d) => d.bookings.length === 0 },
+    { isEmpty: (d) => d.items.length === 0 },
   )
 
   const closeModal = () => {
@@ -93,7 +93,7 @@ export function MyBookingsPage() {
       {status === 'success' && (
         <>
           <ul className="mt-8 flex flex-col gap-5">
-            {data.bookings.map((b) => (
+            {data.items.map((b) => (
               <li key={b.id}>
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-[13px] text-text-muted">

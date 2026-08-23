@@ -299,7 +299,7 @@ export async function getBookingById({ bookingId, userId, role }) {
  * Get bookings for the authenticated user (FR-18)
  * @param {string} userId
  * @param {object} queryParams
- * @returns {Promise<{ bookings: Array, total: number, page: number, totalPages: number }>}
+ * @returns {Promise<{ items: Array, total: number, page: number, limit: number, totalPages: number }>}
  */
 export async function getUserBookings(userId, queryParams = {}) {
   const { page = 1, limit = 10 } = queryParams;
@@ -317,9 +317,10 @@ export async function getUserBookings(userId, queryParams = {}) {
   ]);
 
   return {
-    bookings,
+    items: bookings,
     total,
     page: pageNum,
+    limit: limitNum,
     totalPages: Math.ceil(total / limitNum),
   };
 }
@@ -327,7 +328,7 @@ export async function getUserBookings(userId, queryParams = {}) {
 /**
  * Get all bookings across events for Admin (FR-24, FR-25)
  * @param {object} queryParams
- * @returns {Promise<{ bookings: Array, total: number, page: number, totalPages: number }>}
+ * @returns {Promise<{ items: Array, total: number, page: number, limit: number, totalPages: number }>}
  */
 export async function getAllBookings(queryParams = {}) {
   const { eventId, page = 1, limit = 20 } = queryParams;
@@ -351,9 +352,10 @@ export async function getAllBookings(queryParams = {}) {
   ]);
 
   return {
-    bookings,
+    items: bookings,
     total,
     page: pageNum,
+    limit: limitNum,
     totalPages: Math.ceil(total / limitNum),
   };
 }

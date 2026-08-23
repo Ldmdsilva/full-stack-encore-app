@@ -5,12 +5,13 @@ import { bookingConfirmed, bookingPending } from '@/test/fixtures'
 describe('bookings api', () => {
   it('lists the current user’s bookings', async () => {
     const result = await bookingsApi.listMine({ page: 1, limit: 10 })
-    expect(result.bookings.map((b) => b.id)).toContain(bookingPending.id)
+    expect(result.items.map((b) => b.id)).toContain(bookingPending.id)
+    expect(result.limit).toBe(10)
   })
 
   it('lists all bookings (admin)', async () => {
     const result = await bookingsApi.listAll({ page: 1, limit: 10 })
-    expect(result.bookings.length).toBeGreaterThan(0)
+    expect(result.items.length).toBeGreaterThan(0)
   })
 
   it('fetches a booking by id', async () => {

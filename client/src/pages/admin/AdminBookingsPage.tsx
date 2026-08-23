@@ -37,10 +37,10 @@ export function AdminBookingsPage() {
   const { status, data, error, retry } = useAsync(
     () => bookingsApi.listAll({ eventId: eventFilter || undefined, page, limit: PAGE_SIZE }),
     [page, eventFilter],
-    { isEmpty: (d) => d.bookings.length === 0 },
+    { isEmpty: (d) => d.items.length === 0 },
   )
 
-  const bookings = status === 'success' || status === 'empty' ? data.bookings : []
+  const bookings = status === 'success' || status === 'empty' ? data.items : []
 
   const filtered = bookings.filter((b) => {
     const matchStatus = statusFilter === 'all' || b.status === statusFilter

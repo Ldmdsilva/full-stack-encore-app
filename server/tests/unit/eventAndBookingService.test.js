@@ -176,11 +176,13 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
     expect(eventAfterHold.seats.find((s) => s.id === 'S-1').status).toBe('held');
 
     const userBookings = await bookingService.getUserBookings(user.id);
-    expect(userBookings.bookings).toHaveLength(1);
+    expect(userBookings.items).toHaveLength(1);
     expect(userBookings.total).toBe(1);
-    expect(userBookings.bookings[0].status).toBe('pending');
+    expect(userBookings.items[0].status).toBe('pending');
+    expect(userBookings.limit).toBe(10);
 
     const allBookings = await bookingService.getAllBookings({ eventId: event._id });
-    expect(allBookings.bookings).toHaveLength(1);
+    expect(allBookings.items).toHaveLength(1);
+    expect(allBookings.limit).toBe(20);
   });
 });
