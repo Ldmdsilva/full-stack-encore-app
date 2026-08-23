@@ -1,78 +1,78 @@
 import * as React from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { CheckCircle2, Clock, XCircle } from 'lucide-react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { CheckCircle2, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { TicketStub } from '@/components/TicketStub'
 import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { useSocket } from '@/context/SocketContext'
-import { useAsync } from '@/hooks/useAsync'
 import * as bookingsApi from '@/lib/api/bookings'
-import * as paymentsApi from '@/lib/api/payments'
+import { parseApiError } from '@/lib/api/errors'
 import { formatPrice, formatStubDate } from '@/lib/formatters'
-import type { Booking, BookingUpdatedPayload } from '@/lib/types'
+import type { Booking, BookingConfirmedPayload } from '@/lib/types'
 
-const POLL_INTERVAL_MS = 2000
-const POLL_TIMEOUT_MS = 30000
+// How often to poll `bookings.getByHold` while reconciling, and how long to
+// keep polling before settling into the calm "still processing" state
+// instead of an error — a 404 from that endpoint is EXPECTED here (it means
+// the reconciliation job hasn't fulfilled the hold yet), never a failure.
+const POLL_INTERVAL_MS = 4000
+const POLL_TIMEOUT_MS = 120_000
 
+/**
+ * Two modes, matched on how the page was reached:
+ *  - `/confirmation?hold=<holdId>` — RECONCILING: payment was confirmed
+ *    client-side but the server-side `bookings.confirm` fulfillment hasn't
+ *    been observed yet (e.g. the confirm call itself failed/timed out, or
+ *    the tab was closed and reopened). Poll `by-hold` and listen for the
+ *    `booking:confirmed` socket push; whichever resolves first wins.
+ *  - `/confirmation/:bookingId` — RESOLVED: the booking exists, show it.
+ */
 export function ConfirmationPage() {
   const { bookingId } = useParams<{ bookingId: string }>()
+  const [searchParams] = useSearchParams()
+  const holdId = searchParams.get('hold')
   const navigate = useNavigate()
-  const { socket } = useSocket()
 
-  const { status, data, error, retry } = useAsync(
-    () => (bookingId ? bookingsApi.getById(bookingId) : Promise.reject(new Error('Missing booking id'))),
-    [bookingId],
-  )
-
-  // The booking is `pending` until its payment is confirmed — that can
-  // land after this page has already mounted. There's no Stripe webhook in
-  // this deployment, so confirmation is driven from here instead: each
-  // check below calls `confirmPayment`, which reconciles the booking
-  // against its own Checkout Session directly on Stripe (via the secret
-  // key) and flips it to `confirmed` server-side if it's been paid. Listen
-  // on the socket for a push, and poll as a fallback in case the socket is
-  // down (§FR-16-ish). `booking` is adjusted during render (React's
-  // documented alternative to an effect that only mirrors another value)
-  // whenever the fetch produces a new booking object; the socket/poll
-  // effect below then owns further updates to it via setBooking directly.
-  const [booking, setBooking] = React.useState<Booking | null>(null)
-  const [syncedFrom, setSyncedFrom] = React.useState<Booking | null>(null)
-  if (status === 'success' && data.booking !== syncedFrom) {
-    setSyncedFrom(data.booking)
-    setBooking(data.booking)
+  if (bookingId) {
+    return <ResolvedConfirmation bookingId={bookingId} />
   }
 
+  if (holdId) {
+    return <ReconcilingConfirmation holdId={holdId} />
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl px-5 py-24 text-center">
+      <ErrorState title="Nothing to confirm" description="We couldn't find a booking or reservation to show here." />
+      <Button className="mt-6" onClick={() => navigate('/films')}>
+        Back to browsing
+      </Button>
+    </div>
+  )
+}
+
+function ResolvedConfirmation({ bookingId }: { bookingId: string }) {
+  const navigate = useNavigate()
+  const [status, setStatus] = React.useState<'loading' | 'error' | 'success'>('loading')
+  const [booking, setBooking] = React.useState<Booking | null>(null)
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
+
+  const load = React.useCallback(() => {
+    setStatus('loading')
+    bookingsApi
+      .getById(bookingId)
+      .then(({ booking: b }) => {
+        setBooking(b)
+        setStatus('success')
+      })
+      .catch((err) => {
+        setErrorMessage(parseApiError(err).message)
+        setStatus('error')
+      })
+  }, [bookingId])
+
   React.useEffect(() => {
-    if (!bookingId || !booking || booking.status !== 'pending') return
-    const id = bookingId
-
-    function handleBookingUpdated(payload: BookingUpdatedPayload) {
-      if (payload.bookingId !== id) return
-      paymentsApi.confirmPayment(id).then(({ booking: fresh }) => setBooking(fresh))
-    }
-    socket.on('booking:updated', handleBookingUpdated)
-
-    const startedAt = Date.now()
-    const interval = setInterval(async () => {
-      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
-        clearInterval(interval)
-        return
-      }
-      try {
-        const { booking: fresh } = await paymentsApi.confirmPayment(id)
-        setBooking(fresh)
-        if (fresh.status !== 'pending') clearInterval(interval)
-      } catch {
-        // Transient — the next tick (or the socket) will catch it up.
-      }
-    }, POLL_INTERVAL_MS)
-
-    return () => {
-      socket.off('booking:updated', handleBookingUpdated)
-      clearInterval(interval)
-    }
-  }, [bookingId, booking, socket])
+    load()
+  }, [load])
 
   if (status === 'loading') {
     return <Spinner label="Loading your booking…" className="py-32" />
@@ -82,49 +82,9 @@ export function ConfirmationPage() {
     return (
       <div className="mx-auto max-w-3xl px-5 py-24 text-center">
         <h1 className="font-voice text-[32px] font-medium">Booking not found</h1>
-        {error && <ErrorState description={error.message} onRetry={retry} className="mt-4" />}
+        {errorMessage && <ErrorState description={errorMessage} onRetry={load} className="mt-4" />}
         <Button className="mt-6" onClick={() => navigate('/bookings')}>
-          View my tickets
-        </Button>
-      </div>
-    )
-  }
-
-  if (booking.status === 'pending') {
-    return (
-      <div className="mx-auto max-w-2xl px-5 py-24 text-center">
-        <span className="inline-flex size-12 items-center justify-center rounded-full bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
-          <Clock className="size-6 animate-pulse" />
-        </span>
-        <h1 className="mt-4 font-voice text-[32px] font-medium tracking-[-0.02em]">
-          Confirming payment…
-        </h1>
-        <p className="mt-2 text-text-secondary">
-          Booking <span className="font-mono text-foreground">{booking.reference}</span> is
-          awaiting confirmation from Stripe. This page will update automatically — no need to
-          refresh.
-        </p>
-      </div>
-    )
-  }
-
-  if (booking.status === 'cancelled' || booking.status === 'expired') {
-    return (
-      <div className="mx-auto max-w-2xl px-5 py-24 text-center">
-        <span className="inline-flex size-12 items-center justify-center rounded-full bg-[var(--status-cancelled-bg)] text-[var(--status-cancelled-fg)]">
-          <XCircle className="size-6" />
-        </span>
-        <h1 className="mt-4 font-voice text-[32px] font-medium tracking-[-0.02em]">
-          {booking.status === 'expired' ? 'This hold expired.' : 'Booking cancelled.'}
-        </h1>
-        <p className="mt-2 text-text-secondary">
-          Booking <span className="font-mono text-foreground">{booking.reference}</span>{' '}
-          {booking.status === 'expired'
-            ? 'was not paid for in time and the seats were released.'
-            : 'has been cancelled.'}
-        </p>
-        <Button className="mt-6" onClick={() => navigate('/events')}>
-          Browse concerts
+          View my bookings
         </Button>
       </div>
     )
@@ -136,41 +96,128 @@ export function ConfirmationPage() {
         <span className="inline-flex size-12 items-center justify-center rounded-full bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-fg)]">
           <CheckCircle2 className="size-6" />
         </span>
-        <h1 className="mt-4 font-voice text-[36px] font-medium tracking-[-0.02em]">
-          You're going.
-        </h1>
+        <h1 className="mt-4 font-voice text-[36px] font-medium tracking-[-0.02em]">You're going.</h1>
         <p className="mt-2 text-text-secondary">
-          Booking{' '}
-          <span className="font-mono text-foreground">{booking.reference}</span>{' '}
-          is confirmed. Keep this stub — it's your ticket.
+          Booking <span className="font-mono text-foreground">{booking.reference}</span> is confirmed. Keep this
+          stub — it's your ticket.
         </p>
       </div>
 
-      <div className="flex flex-col gap-3">
-        {booking.seats.map((s) => (
-          <TicketStub
-            key={s.id}
-            eyebrow={booking.event ? formatStubDate(booking.event.date) : ''}
-            title={booking.event?.artist ?? 'Event'}
-            subtitle={booking.event?.title ?? ''}
-            fields={[
-              { label: 'Section', value: s.section },
-              { label: 'Seat', value: s.id },
-              { label: 'Price', value: formatPrice(s.price) },
-            ]}
-            serial={booking.reference}
-          />
-        ))}
+      <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-6">
+        {booking.showtime && (
+          <p className="font-mono text-[12px] uppercase tracking-[0.08em] text-text-muted">
+            {booking.showtime.screenName} · {formatStubDate(booking.showtime.startsAt)}
+          </p>
+        )}
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {booking.seats.map((s) => (
+            <li key={s.id} className="flex justify-between font-mono text-[13px]">
+              <span>
+                {s.id} <span className="text-text-muted">· {s.section}</span>
+              </span>
+              <span>{formatPrice(s.price)}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3 flex justify-between border-t border-border pt-3 text-[14px] font-medium">
+          <span>Total paid</span>
+          <span>{formatPrice(booking.totalPrice)}</span>
+        </div>
       </div>
 
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
         <Button variant="secondary" size="md" onClick={() => navigate('/bookings')}>
-          View my tickets
-        </Button>
-        <Button variant="ghost" size="md" onClick={() => navigate('/events')}>
-          Browse more concerts
+          View my bookings
         </Button>
       </div>
+    </div>
+  )
+}
+
+type ReconcileState = 'polling' | 'timed-out'
+
+function ReconcilingConfirmation({ holdId }: { holdId: string }) {
+  const navigate = useNavigate()
+  const { socket } = useSocket()
+  const [state, setState] = React.useState<ReconcileState>('polling')
+
+  React.useEffect(() => {
+    setState('polling')
+    let cancelled = false
+    let resolved = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const resolve = (bookingId: string) => {
+      if (resolved || cancelled) return
+      resolved = true
+      clearTimeout(timeoutId)
+      // Replace history so the back button returns to the showtime/browse
+      // flow, not back into the polling state.
+      navigate(`/confirmation/${bookingId}`, { replace: true })
+    }
+
+    function handleBookingConfirmed(payload: BookingConfirmedPayload) {
+      if (payload.holdId !== holdId) return
+      resolve(payload.bookingId)
+    }
+    socket.on('booking:confirmed', handleBookingConfirmed)
+
+    const startedAt = Date.now()
+
+    async function poll() {
+      if (cancelled || resolved) return
+      try {
+        const { booking } = await bookingsApi.getByHold(holdId)
+        resolve(booking.id)
+        return
+      } catch {
+        // A 404 here is expected — the reconciliation job hasn't fulfilled
+        // this hold yet. Never treated as an error; just try again later.
+      }
+      if (cancelled || resolved) return
+      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
+        setState('timed-out')
+        return
+      }
+      timeoutId = setTimeout(poll, POLL_INTERVAL_MS)
+    }
+
+    timeoutId = setTimeout(poll, POLL_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+      socket.off('booking:confirmed', handleBookingConfirmed)
+    }
+  }, [holdId, socket, navigate])
+
+  if (state === 'timed-out') {
+    return (
+      <div className="mx-auto max-w-2xl px-5 py-24 text-center">
+        <span className="inline-flex size-12 items-center justify-center rounded-full bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-fg)]">
+          <Clock className="size-6" />
+        </span>
+        <h1 className="mt-4 font-voice text-[32px] font-medium tracking-[-0.02em]">Still finalising your booking</h1>
+        <p className="mx-auto mt-2 max-w-md text-text-secondary">
+          Your payment went through and your seats are safe — this is just taking a little longer than usual to
+          finalise. Check My Bookings in a few minutes and it'll be there.
+        </p>
+        <Button className="mt-6" onClick={() => navigate('/bookings')}>
+          Check my bookings
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl px-5 py-24 text-center">
+      <span className="inline-flex size-12 items-center justify-center rounded-full bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]">
+        <Clock className="size-6 animate-pulse" />
+      </span>
+      <h1 className="mt-4 font-voice text-[32px] font-medium tracking-[-0.02em]">Confirming your booking…</h1>
+      <p className="mt-2 text-text-secondary">
+        Your payment is being finalised. This page will update automatically — no need to refresh.
+      </p>
     </div>
   )
 }

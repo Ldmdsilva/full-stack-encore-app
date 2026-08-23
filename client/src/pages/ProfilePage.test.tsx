@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { ProfilePage } from './ProfilePage'
 import { useAuth } from '@/context/AuthContext'
 import { renderPage } from '@/test/utils'
+import { unverifiedUser } from '@/test/fixtures'
 
 // ProfilePage assumes it is only ever mounted once App's ProtectedRoute has
 // already resolved `status` to 'authenticated' (see App.tsx) — its own
@@ -82,5 +83,36 @@ describe('ProfilePage', () => {
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /delete your account/i })).toBeInTheDocument()
+  })
+
+  it('hides the verification notice for a verified user', async () => {
+    renderPage(
+      <AuthGate>
+        <ProfilePage />
+      </AuthGate>,
+      '/profile',
+      { token: 'test-token' },
+    )
+    await screen.findByDisplayValue('Alex Rivera')
+    expect(screen.queryByText(/isn't verified yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /resend verification email/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the verification notice for an unverified user and confirms resend', async () => {
+    const user = userEvent.setup()
+    renderPage(
+      <AuthGate>
+        <ProfilePage />
+      </AuthGate>,
+      '/profile',
+      { token: 'unverified-token' },
+    )
+    expect(await screen.findByDisplayValue(unverifiedUser.name)).toBeInTheDocument()
+    expect(screen.getByText(/isn't verified yet/i)).toBeInTheDocument()
+
+    const resendButton = screen.getByRole('button', { name: /resend verification email/i })
+    await user.click(resendButton)
+
+    expect(await screen.findByText(/verification email sent/i)).toBeInTheDocument()
   })
 })

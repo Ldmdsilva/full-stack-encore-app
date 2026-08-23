@@ -8,8 +8,8 @@ interface SocketContextValue {
   /** Bumps on every reconnect — consumers should re-fetch authoritative
    * state rather than trust whatever they cached across the gap (FR-16, R7). */
   reconnectCount: number
-  joinEvent: (eventId: string) => void
-  leaveEvent: (eventId: string) => void
+  joinShowtime: (showtimeId: string) => void
+  leaveShowtime: (showtimeId: string) => void
 }
 
 const SocketContext = React.createContext<SocketContextValue | null>(null)
@@ -63,10 +63,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- disconnect only on final unmount
   }, [])
 
-  const joinEvent = React.useCallback((eventId: string) => socket.emit('join:event', { eventId }), [socket])
-  const leaveEvent = React.useCallback((eventId: string) => socket.emit('leave:event', { eventId }), [socket])
+  const joinShowtime = React.useCallback(
+    (showtimeId: string) => socket.emit('join:showtime', { showtimeId }),
+    [socket],
+  )
+  const leaveShowtime = React.useCallback(
+    (showtimeId: string) => socket.emit('leave:showtime', { showtimeId }),
+    [socket],
+  )
 
-  const value: SocketContextValue = { socket, isConnected, reconnectCount, joinEvent, leaveEvent }
+  const value: SocketContextValue = { socket, isConnected, reconnectCount, joinShowtime, leaveShowtime }
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>
 }

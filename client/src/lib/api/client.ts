@@ -21,10 +21,18 @@ apiClient.interceptors.response.use(
 
     // Client guards are UX only — the server authorises every write. This
     // interceptor just reacts to a 401 the server already enforced.
-    if (
-      (apiError.code === 'UNAUTHORIZED' || apiError.code === 'TOKEN_EXPIRED' || apiError.code === 'INVALID_TOKEN') &&
-      typeof window !== 'undefined'
-    ) {
+    //
+    // Deliberately keyed on HTTP `status`, NOT `code`: TOKEN_EXPIRED and
+    // INVALID_TOKEN are ALSO the exact codes the server returns for an
+    // expired/garbage email-verification or password-reset link, which come
+    // back as 400, not 401 (see middleware/auth.js vs authService's token
+    // consumption path). Keying on `code` would log a user out of their
+    // ACTIVE session purely because they clicked an old verification link —
+    // checking `status === 401` (the status every auth-required-but-
+    // missing/invalid/expired/revoked JWT case actually uses, per
+    // middleware/auth.js and middleware/verifiedGuard.js) avoids that
+    // collision entirely; a 400 never reaches this branch.
+    if (apiError.status === 401 && typeof window !== 'undefined') {
       setToken(null)
       if (window.location.pathname !== '/login') {
         window.location.assign('/login')

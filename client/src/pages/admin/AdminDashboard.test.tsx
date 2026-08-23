@@ -10,6 +10,6 @@ describe('AdminDashboard', () => {
     expect(await screen.findByRole('heading', { name: /dashboard/i })).toBeInTheDocument()
     expect(await screen.findByText(String(adminStats.totalBookings))).toBeInTheDocument()
     expect(await screen.findByText(/recent bookings/i)).toBeInTheDocument()
-    expect(await screen.findByText(/top events/i)).toBeInTheDocument()
+    expect(await screen.findByText(/top showtimes/i)).toBeInTheDocument()
   })
 })

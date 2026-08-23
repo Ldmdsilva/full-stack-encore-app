@@ -163,7 +163,7 @@ export function AdminEventsPage() {
                           </p>
                           <div className="mt-1 ml-auto h-1 w-16 overflow-hidden rounded-full bg-surface-sunk">
                             <div
-                              className="h-full rounded-full bg-stage-green"
+                              className="h-full rounded-full bg-seat-free"
                               style={{ width: `${pct}%` }}
                             />
                           </div>
@@ -190,7 +190,7 @@ export function AdminEventsPage() {
                               className={cn(
                                 'flex size-8 items-center justify-center rounded-[6px] border-[0.5px] transition-colors disabled:opacity-50',
                                 evt.status === 'scheduled'
-                                  ? 'border-stage-green/30 bg-stage-green/10 text-stage-green hover:bg-stage-green/20'
+                                  ? 'border-seat-free/30 bg-seat-free/10 text-seat-free hover:bg-seat-free/20'
                                   : 'border-stamp-red/30 bg-stamp-red/10 text-stamp-red hover:bg-stamp-red/20',
                               )}
                               title={evt.status === 'scheduled' ? 'Cancel event' : 'Re-schedule event'}

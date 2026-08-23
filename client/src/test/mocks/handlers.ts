@@ -4,28 +4,29 @@
 // single case (a 409 conflict, an expired hold, ...) via `server.use(...)`;
 // `setupTests.ts` resets to these defaults after every test.
 import { http, HttpResponse } from 'msw'
-import type {
-  AdminEvent,
-  AdminStats,
-  Booking,
-  EventSummary,
-  Seat,
-  User,
-  Venue,
-} from '@/lib/types'
+import type { AdminShowtime, AdminStats, Booking, Cinema, CinemaSummary, Film, ShowtimeSeat, ShowtimeSummary, User } from '@/lib/types'
 import {
-  adminEventA,
-  adminEventB,
+  adminShowtimeA,
+  adminShowtimeB,
   adminStats,
   adminUser,
+  bookingCancelled,
   bookingConfirmed,
-  bookingPending,
+  bookingRefunded,
+  cinemaA,
+  cinemaB,
+  cinemaSummaryA,
+  cinemaSummaryB,
+  createHoldPaymentIntentResponseA,
+  createHoldResponseA,
   customerUser,
-  eventSeats,
-  eventSummaryA,
-  eventSummaryB,
-  venueA,
-  venueB,
+  filmA,
+  filmB,
+  holdA,
+  showtimeSeats,
+  showtimeSummaryA,
+  showtimeSummaryB,
+  unverifiedUser,
 } from '@/test/fixtures'
 
 const API = '/api'
@@ -37,17 +38,20 @@ function errorBody(code: string, message: string, details?: unknown) {
 function userForToken(authHeader: string | null): User | null {
   if (authHeader === 'Bearer test-token') return customerUser
   if (authHeader === 'Bearer admin-token') return adminUser
+  if (authHeader === 'Bearer unverified-token') return unverifiedUser
   return null
 }
 
-const events: EventSummary[] = [eventSummaryA, eventSummaryB]
-const eventSeatsById: Record<string, Seat[]> = {
-  [eventSummaryA.id]: eventSeats,
-  [eventSummaryB.id]: [],
+const films: Film[] = [filmA, filmB]
+const cinemas: Cinema[] = [cinemaA, cinemaB]
+const cinemaSummaries: CinemaSummary[] = [cinemaSummaryA, cinemaSummaryB]
+const showtimes: ShowtimeSummary[] = [showtimeSummaryA, showtimeSummaryB]
+const showtimeSeatsById: Record<string, ShowtimeSeat[]> = {
+  [showtimeSummaryA.id]: showtimeSeats,
+  [showtimeSummaryB.id]: [],
 }
-const venues: Venue[] = [venueA, venueB]
-const adminEvents: AdminEvent[] = [adminEventA, adminEventB]
-const bookings: Booking[] = [bookingPending, bookingConfirmed]
+const adminShowtimes: AdminShowtime[] = [adminShowtimeA, adminShowtimeB]
+const bookings: Booking[] = [bookingConfirmed, bookingCancelled, bookingRefunded]
 
 export const handlers = [
   // --- auth ---
@@ -58,7 +62,31 @@ export const handlers = [
         status: 409,
       })
     }
-    return HttpResponse.json({ user: customerUser, token: 'test-token' }, { status: 201 })
+    return HttpResponse.json({ message: 'Registered. Please check your email to verify your account.' }, { status: 202 })
+  }),
+
+  http.post(`${API}/auth/verify-email`, async ({ request }) => {
+    const body = (await request.json()) as { token?: string }
+    if (body.token === 'stale') {
+      return HttpResponse.json(errorBody('TOKEN_EXPIRED', 'This link has expired.'), { status: 400 })
+    }
+    if (body.token === 'not-found-token') {
+      return HttpResponse.json(errorBody('TOKEN_NOT_FOUND', 'This verification link could not be found.'), {
+        status: 400,
+      })
+    }
+    if (body.token === 'used-token') {
+      return HttpResponse.json(errorBody('TOKEN_USED', 'This verification link has already been used.'), {
+        status: 400,
+      })
+    }
+    return HttpResponse.json({ verified: true })
+  }),
+
+  http.post(`${API}/auth/resend-verification`, ({ request }) => {
+    const user = userForToken(request.headers.get('authorization'))
+    if (!user) return HttpResponse.json(errorBody('UNAUTHORIZED', 'Please sign in to continue.'), { status: 401 })
+    return HttpResponse.json({ message: 'Verification email sent.' }, { status: 202 })
   }),
 
   http.post(`${API}/auth/login`, async ({ request }) => {
@@ -70,6 +98,24 @@ export const handlers = [
       return HttpResponse.json({ user: adminUser, token: 'admin-token' }, { status: 200 })
     }
     return HttpResponse.json(errorBody('INVALID_CREDENTIALS', 'Incorrect email or password.'), { status: 401 })
+  }),
+
+  http.post(`${API}/auth/forgot-password`, () =>
+    HttpResponse.json({ message: 'If that email exists, a reset link has been sent.' }, { status: 202 }),
+  ),
+
+  http.post(`${API}/auth/reset-password`, async ({ request }) => {
+    const body = (await request.json()) as { token?: string }
+    if (body.token === 'bad') {
+      return HttpResponse.json(errorBody('INVALID_TOKEN', 'This link is invalid.'), { status: 400 })
+    }
+    if (body.token === 'not-found-token') {
+      return HttpResponse.json(errorBody('TOKEN_NOT_FOUND', 'This reset link could not be found.'), { status: 400 })
+    }
+    if (body.token === 'used-token') {
+      return HttpResponse.json(errorBody('TOKEN_USED', 'This reset link has already been used.'), { status: 400 })
+    }
+    return HttpResponse.json({ message: 'Password reset successfully.' })
   }),
 
   http.get(`${API}/users/me`, ({ request }) => {
@@ -87,108 +133,146 @@ export const handlers = [
 
   http.delete(`${API}/users/me`, () => new HttpResponse(null, { status: 204 })),
 
-  // --- events ---
-  http.get(`${API}/events`, ({ request }) => {
+  // --- films ---
+  http.get(`${API}/films`, ({ request }) => {
     const url = new URL(request.url)
-    const artist = url.searchParams.get('artist')?.toLowerCase()
     const genre = url.searchParams.get('genre')
-    const venue = url.searchParams.get('venue')
+    const search = url.searchParams.get('search')
     const page = Number(url.searchParams.get('page') ?? '1')
-    const limit = Number(url.searchParams.get('limit') ?? '9')
+    const limit = Number(url.searchParams.get('limit') ?? '20')
 
-    let filtered = events
-    if (artist) {
-      filtered = filtered.filter(
-        (e) => e.artist.toLowerCase().includes(artist) || e.title.toLowerCase().includes(artist),
-      )
-    }
-    if (genre) filtered = filtered.filter((e) => e.genre === genre)
-    if (venue) filtered = filtered.filter((e) => e.venue.id === venue)
+    let filtered = films
+    if (genre) filtered = filtered.filter((f) => f.genre.includes(genre))
+    if (search) filtered = filtered.filter((f) => f.title.toLowerCase().includes(search.toLowerCase()))
 
     const total = filtered.length
     const totalPages = Math.max(1, Math.ceil(total / limit))
     const start = (page - 1) * limit
-    return HttpResponse.json({
-      events: filtered.slice(start, start + limit),
-      total,
-      page,
-      totalPages,
-    })
+    return HttpResponse.json({ items: filtered.slice(start, start + limit), total, page, limit, totalPages })
   }),
 
-  http.get(`${API}/events/:id`, ({ params }) => {
-    const event = events.find((e) => e.id === params.id)
-    if (!event) {
-      return HttpResponse.json(errorBody('EVENT_NOT_FOUND', 'This event could not be found.'), { status: 404 })
-    }
-    return HttpResponse.json({ event, seats: eventSeatsById[event.id] ?? [] })
+  http.get(`${API}/films/:id`, ({ params }) => {
+    const film = films.find((f) => f.id === params.id)
+    if (!film) return HttpResponse.json(errorBody('FILM_NOT_FOUND', 'This film could not be found.'), { status: 404 })
+    return HttpResponse.json({ film })
   }),
 
-  http.post(`${API}/events`, async ({ request }) => {
+  http.post(`${API}/films`, async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>
-    return HttpResponse.json(
-      {
-        event: {
-          ...eventSummaryA,
-          id: 'event-new',
-          status: 'scheduled',
-          availableSeats: 0,
-          totalSeats: 0,
-          ...body,
-        },
-      },
-      { status: 201 },
-    )
+    return HttpResponse.json({ film: { ...filmA, id: 'film-new', ...body } }, { status: 201 })
   }),
 
-  http.patch(`${API}/events/:id`, async ({ request, params }) => {
+  http.put(`${API}/films/:id`, async ({ request, params }) => {
     const body = (await request.json()) as Record<string, unknown>
-    const existing = events.find((e) => e.id === params.id) ?? eventSummaryA
-    return HttpResponse.json({ event: { ...existing, ...body } })
+    const existing = films.find((f) => f.id === params.id) ?? filmA
+    return HttpResponse.json({ film: { ...existing, ...body } })
   }),
 
-  http.delete(`${API}/events/:id`, () => new HttpResponse(null, { status: 204 })),
-
-  // --- venues ---
-  http.get(`${API}/venues`, () => HttpResponse.json({ venues })),
-
-  http.get(`${API}/venues/:id`, ({ params }) => {
-    const venue = venues.find((v) => v.id === params.id)
-    if (!venue) return HttpResponse.json(errorBody('VENUE_NOT_FOUND', 'This venue could not be found.'), { status: 404 })
-    return HttpResponse.json({ venue })
-  }),
-
-  http.post(`${API}/venues`, async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>
-    return HttpResponse.json({ venue: { ...venueA, id: 'venue-new', ...body } }, { status: 201 })
-  }),
-
-  http.patch(`${API}/venues/:id`, async ({ request, params }) => {
-    const body = (await request.json()) as Record<string, unknown>
-    const existing = venues.find((v) => v.id === params.id) ?? venueA
-    return HttpResponse.json({ venue: { ...existing, ...body } })
-  }),
-
-  http.delete(`${API}/venues/:id`, ({ params }) => {
-    if (params.id === 'venue-in-use') {
+  http.delete(`${API}/films/:id`, ({ params }) => {
+    if (params.id === 'film-in-use') {
       return HttpResponse.json(
-        errorBody('VENUE_IN_USE', 'This venue has events booked against it and cannot be deleted.', {
-          referencingEventsCount: 2,
-        }),
+        errorBody('FILM_IN_USE', 'This film has showtimes scheduled against it and cannot be deleted.'),
         { status: 409 },
       )
     }
     return new HttpResponse(null, { status: 204 })
   }),
 
-  // --- bookings ---
-  http.post(`${API}/bookings`, () =>
-    HttpResponse.json({ booking: bookingPending, clientSecret: 'pi_test_secret' }, { status: 201 }),
-  ),
+  // --- cinemas ---
+  http.get(`${API}/cinemas`, () => HttpResponse.json({ items: cinemaSummaries })),
 
+  http.get(`${API}/cinemas/:id`, ({ params }) => {
+    const cinema = cinemas.find((c) => c.id === params.id)
+    if (!cinema) return HttpResponse.json(errorBody('CINEMA_NOT_FOUND', 'This cinema could not be found.'), { status: 404 })
+    return HttpResponse.json({ cinema })
+  }),
+
+  http.post(`${API}/cinemas`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>
+    return HttpResponse.json({ cinema: { ...cinemaA, id: 'cinema-new', ...body } }, { status: 201 })
+  }),
+
+  http.patch(`${API}/cinemas/:id`, async ({ request, params }) => {
+    const body = (await request.json()) as Record<string, unknown>
+    const existing = cinemas.find((c) => c.id === params.id) ?? cinemaA
+    return HttpResponse.json({ cinema: { ...existing, ...body } })
+  }),
+
+  http.delete(`${API}/cinemas/:id`, ({ params }) => {
+    if (params.id === 'cinema-in-use') {
+      return HttpResponse.json(
+        errorBody('CINEMA_IN_USE', 'This cinema has showtimes scheduled against it and cannot be deleted.'),
+        { status: 409 },
+      )
+    }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // --- showtimes ---
+  http.get(`${API}/showtimes`, ({ request }) => {
+    const url = new URL(request.url)
+    const filmId = url.searchParams.get('filmId')
+    const cinemaId = url.searchParams.get('cinemaId')
+    const page = Number(url.searchParams.get('page') ?? '1')
+    const limit = Number(url.searchParams.get('limit') ?? '20')
+
+    let filtered = showtimes
+    if (filmId) filtered = filtered.filter((s) => s.film?.id === filmId)
+    if (cinemaId) filtered = filtered.filter((s) => s.cinema?.id === cinemaId)
+
+    const total = filtered.length
+    const totalPages = Math.max(1, Math.ceil(total / limit))
+    const start = (page - 1) * limit
+    return HttpResponse.json({ items: filtered.slice(start, start + limit), total, page, limit, totalPages })
+  }),
+
+  http.get(`${API}/showtimes/:id`, ({ params }) => {
+    const showtime = showtimes.find((s) => s.id === params.id)
+    if (!showtime) {
+      return HttpResponse.json(errorBody('SHOWTIME_NOT_FOUND', 'This showtime could not be found.'), { status: 404 })
+    }
+    return HttpResponse.json({ showtime, seats: showtimeSeatsById[showtime.id] ?? [] })
+  }),
+
+  http.post(`${API}/showtimes`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>
+    return HttpResponse.json({ showtime: { ...showtimeSummaryA, id: 'showtime-new', ...body } }, { status: 201 })
+  }),
+
+  http.patch(`${API}/showtimes/:id/cancel`, ({ params }) => {
+    const existing = showtimes.find((s) => s.id === params.id) ?? showtimeSummaryA
+    return HttpResponse.json({ showtime: { ...existing, status: 'cancelled' } })
+  }),
+
+  // --- holds ---
+  http.post(`${API}/holds`, () => HttpResponse.json(createHoldResponseA, { status: 201 })),
+
+  http.get(`${API}/holds/:id`, ({ params }) => {
+    if (params.id === 'nope') {
+      return HttpResponse.json(errorBody('HOLD_NOT_FOUND', 'This hold could not be found — it may have expired.'), {
+        status: 404,
+      })
+    }
+    return HttpResponse.json({ ...holdA, holdId: params.id as string })
+  }),
+
+  http.post(`${API}/holds/:id/payment-intent`, () => HttpResponse.json(createHoldPaymentIntentResponseA, { status: 201 })),
+
+  http.delete(`${API}/holds/:id`, () => new HttpResponse(null, { status: 204 })),
+
+  // --- bookings ---
   http.get(`${API}/bookings/me`, () =>
     HttpResponse.json({ items: bookings, total: bookings.length, page: 1, limit: 10, totalPages: 1 }),
   ),
+
+  http.post(`${API}/bookings/confirm`, () => HttpResponse.json({ booking: bookingConfirmed })),
+
+  http.get(`${API}/bookings/by-hold/:holdId`, ({ params }) => {
+    if (params.holdId === 'hold-reconciling') {
+      return HttpResponse.json(errorBody('BOOKING_NOT_FOUND', 'This booking could not be found.'), { status: 404 })
+    }
+    return HttpResponse.json({ booking: bookingConfirmed })
+  }),
 
   http.get(`${API}/bookings/:id`, ({ params }) => {
     const booking = bookings.find((b) => b.id === params.id)
@@ -203,21 +287,33 @@ export const handlers = [
   ),
 
   http.patch(`${API}/bookings/:id/cancel`, ({ params }) => {
-    const booking = bookings.find((b) => b.id === params.id) ?? bookingPending
+    const booking = bookings.find((b) => b.id === params.id) ?? bookingConfirmed
     return HttpResponse.json({ booking: { ...booking, status: 'cancelled' } })
   }),
-
-  // --- payments ---
-  http.post(`${API}/bookings/:id/payment-session`, () =>
-    HttpResponse.json({ clientSecret: 'pi_test_resumed_secret', publishableKey: 'pk_test_x' }),
-  ),
 
   // --- admin ---
   http.get(`${API}/admin/stats`, () => HttpResponse.json(adminStats satisfies AdminStats)),
 
-  http.get(`${API}/admin/events`, () =>
-    HttpResponse.json({ events: adminEvents, total: adminEvents.length, page: 1, totalPages: 1 }),
+  http.get(`${API}/admin/showtimes`, () =>
+    HttpResponse.json({ items: adminShowtimes, total: adminShowtimes.length, page: 1, limit: 20, totalPages: 1 }),
   ),
+
+  // --- dev ---
+  http.get(`${API}/dev/last-mail`, ({ request }) => {
+    const url = new URL(request.url)
+    const email = url.searchParams.get('email')
+    if (!email) return HttpResponse.json(errorBody('VALIDATION_ERROR', 'email query parameter is required'), { status: 400 })
+    if (email === 'unknown@example.com') {
+      return HttpResponse.json(errorBody('MAIL_NOT_FOUND', 'No email found for that address'), { status: 404 })
+    }
+    return HttpResponse.json({
+      to: email,
+      subject: 'Verify your email',
+      html: '<p>Click <a href="https://example.com/verify?token=abc">here</a> to verify.</p>',
+      text: 'Click https://example.com/verify?token=abc to verify.',
+      sentAt: '2026-08-01T00:00:00.000Z',
+    })
+  }),
 
   // --- health ---
   http.get(`${API}/health`, () =>

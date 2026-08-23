@@ -15,8 +15,8 @@ import { formatStubDate, formatPrice } from '@/lib/formatters'
 function PulseDot({ className = '' }: { className?: string }) {
   return (
     <span className={`relative flex size-2 ${className}`}>
-      <span className="absolute inline-flex size-full animate-ping rounded-full bg-stage-green opacity-60" />
-      <span className="relative inline-flex size-2 rounded-full bg-stage-green" />
+      <span className="absolute inline-flex size-full animate-ping rounded-full bg-seat-free opacity-60" />
+      <span className="relative inline-flex size-2 rounded-full bg-seat-free" />
     </span>
   )
 }
@@ -70,9 +70,9 @@ export function HomePage() {
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 py-16 sm:py-24 lg:grid-cols-[1.1fr_1fr] lg:gap-16">
           {/* Left: headline + CTA */}
           <div>
-            <div className="mb-5 inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-[0.5px] border-stage-green/30 bg-stage-green/10 px-3 py-1.5">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-[0.5px] border-seat-free/30 bg-seat-free/10 px-3 py-1.5">
               <PulseDot />
-              <span className="font-mono text-[11px] uppercase tracking-widest text-stage-green">
+              <span className="font-mono text-[11px] uppercase tracking-widest text-seat-free">
                 Live seat maps · Autumn 2026
               </span>
             </div>
@@ -144,7 +144,7 @@ export function HomePage() {
                 <div className="mt-3 flex items-center gap-2 text-[12px] text-text-muted">
                   <PulseDot />
                   <span>Seat map updating live</span>
-                  <Radio className="size-3 text-stage-green" />
+                  <Radio className="size-3 text-seat-free" />
                 </div>
               </>
             )}

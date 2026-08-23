@@ -1,14 +1,19 @@
 // Shared sample data for tests — shapes copied directly from src/lib/types.ts
 // rather than invented, per the client API contract.
 import type {
-  AdminEvent,
+  AdminShowtime,
   AdminStats,
   Booking,
-  EventDetail,
-  EventSummary,
-  Seat,
+  Cinema,
+  CinemaSummary,
+  CreateHoldPaymentIntentResponse,
+  CreateHoldResponse,
+  Film,
+  Hold,
+  ShowtimeDetailResponse,
+  ShowtimeSeat,
+  ShowtimeSummary,
   User,
-  Venue,
 } from '@/lib/types'
 
 export const customerUser: User = {
@@ -17,6 +22,7 @@ export const customerUser: User = {
   email: 'alex@example.com',
   phone: '0771234567',
   role: 'customer',
+  emailVerified: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 }
 
@@ -26,132 +32,214 @@ export const adminUser: User = {
   email: 'jordan@example.com',
   phone: '0777654321',
   role: 'admin',
+  emailVerified: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 }
 
-export const venueA: Venue = {
-  id: 'venue-1',
+export const unverifiedUser: User = {
+  id: 'user-2',
+  name: 'Riley Chen',
+  email: 'riley@example.com',
+  phone: '0779876543',
+  role: 'customer',
+  emailVerified: false,
+  createdAt: '2026-01-01T00:00:00.000Z',
+}
+
+export const filmA: Film = {
+  id: 'film-1',
+  title: 'The Marfa Sessions',
+  synopsis: 'An intimate acoustic evening captured on film.',
+  certificate: '12A',
+  runtimeMinutes: 108,
+  genre: ['Drama', 'Music'],
+  posterUrl: 'https://images.example.com/marfa.jpg',
+  releaseDate: '2026-09-12T00:00:00.000Z',
+  createdAt: '2026-01-01T00:00:00.000Z',
+}
+
+export const filmB: Film = {
+  id: 'film-2',
+  title: 'Night Choir',
+  synopsis: 'A choral mystery set in a hollow valley.',
+  certificate: 'PG',
+  runtimeMinutes: 96,
+  genre: ['Mystery'],
+  releaseDate: '2026-10-01T00:00:00.000Z',
+  createdAt: '2026-01-01T00:00:00.000Z',
+}
+
+export const cinemaA: Cinema = {
+  id: 'cinema-1',
   name: 'The Half Moon',
   address: '123 Galle Road, Colombo 03',
   city: 'Colombo',
-  capacity: 24,
-  seatLayout: [
-    { id: 'A-1', section: 'STALLS', row: 'A', number: 1 },
-    { id: 'A-2', section: 'STALLS', row: 'A', number: 2 },
+  screens: [
+    {
+      screenId: 'screen-1',
+      name: 'Screen 1',
+      capacity: 4,
+      seatLayout: [
+        { id: 'A-1', section: 'STANDARD', row: 'A', number: 1 },
+        { id: 'A-2', section: 'STANDARD', row: 'A', number: 2 },
+        { id: 'A-3', section: 'PREMIUM', row: 'A', number: 3 },
+        { id: 'A-4', section: 'PREMIUM', row: 'A', number: 4 },
+      ],
+    },
   ],
 }
 
-export const venueB: Venue = {
-  id: 'venue-2',
+export const cinemaB: Cinema = {
+  id: 'cinema-2',
   name: 'Marfa Hall',
   address: '9 Marine Drive',
   city: 'Galle',
-  capacity: 12,
-  seatLayout: [{ id: 'A-1', section: 'STALLS', row: 'A', number: 1 }],
+  screens: [
+    {
+      screenId: 'screen-1',
+      name: 'Screen 1',
+      capacity: 1,
+      seatLayout: [{ id: 'A-1', section: 'STANDARD', row: 'A', number: 1 }],
+    },
+  ],
 }
 
-function makeSeats(): Seat[] {
-  const seats: Seat[] = []
-  const rows: [string, ('available' | 'held' | 'booked')[]][] = [
-    ['A', ['available', 'available', 'held', 'booked']],
-    ['B', ['available', 'available', 'available', 'available']],
+export const cinemaSummaryA: CinemaSummary = {
+  id: cinemaA.id,
+  name: cinemaA.name,
+  address: cinemaA.address,
+  city: cinemaA.city,
+  screenCount: cinemaA.screens.length,
+  totalCapacity: cinemaA.screens.reduce((sum, s) => sum + s.capacity, 0),
+}
+
+export const cinemaSummaryB: CinemaSummary = {
+  id: cinemaB.id,
+  name: cinemaB.name,
+  address: cinemaB.address,
+  city: cinemaB.city,
+  screenCount: cinemaB.screens.length,
+  totalCapacity: cinemaB.screens.reduce((sum, s) => sum + s.capacity, 0),
+}
+
+function makeShowtimeSeats(): ShowtimeSeat[] {
+  return [
+    { id: 'A-1', section: 'STANDARD', row: 'A', number: 1, tier: 'STANDARD', price: 1500, status: 'available' },
+    { id: 'A-2', section: 'STANDARD', row: 'A', number: 2, tier: 'STANDARD', price: 1500, status: 'available' },
+    { id: 'A-3', section: 'PREMIUM', row: 'A', number: 3, tier: 'PREMIUM', price: 2000, status: 'held' },
+    { id: 'A-4', section: 'PREMIUM', row: 'A', number: 4, tier: 'PREMIUM', price: 2000, status: 'booked' },
   ]
-  for (const [row, statuses] of rows) {
-    statuses.forEach((status, i) => {
-      seats.push({
-        id: `${row}-${i + 1}`,
-        section: 'STALLS',
-        row,
-        number: i + 1,
-        status,
-        price: 6500,
-      })
-    })
-  }
-  return seats
 }
 
-export const eventSeats: Seat[] = makeSeats()
+export const showtimeSeats: ShowtimeSeat[] = makeShowtimeSeats()
 
-export const eventSummaryA: EventSummary = {
-  id: 'event-1',
-  title: 'The Marfa Sessions',
-  artist: 'Phoebe Wren',
-  genre: 'Folk',
-  imageUrl: 'https://images.example.com/marfa.jpg',
-  description: 'An intimate acoustic evening.',
-  date: '2026-09-12T20:00:00.000Z',
-  basePrice: 6500,
-  venue: { id: venueA.id, name: venueA.name, city: venueA.city },
+export const showtimeSummaryA: ShowtimeSummary = {
+  id: 'showtime-1',
+  film: { id: filmA.id, title: filmA.title, posterUrl: filmA.posterUrl, certificate: filmA.certificate, runtimeMinutes: filmA.runtimeMinutes },
+  cinema: { id: cinemaA.id, name: cinemaA.name, city: cinemaA.city },
+  screenName: 'Screen 1',
+  startsAt: '2026-09-12T20:00:00.000Z',
+  basePrice: 1500,
   status: 'scheduled',
-  availableSeats: 6,
-  totalSeats: 8,
+  totalSeats: 4,
+  availableSeats: 2,
 }
 
-export const eventSummaryB: EventSummary = {
-  id: 'event-2',
-  title: 'Night Choir',
-  artist: 'The Hollow Choir',
-  genre: 'Choral',
-  date: '2026-10-01T19:00:00.000Z',
-  basePrice: 4200,
-  venue: { id: venueB.id, name: venueB.name, city: venueB.city },
+export const showtimeSummaryB: ShowtimeSummary = {
+  id: 'showtime-2',
+  film: { id: filmB.id, title: filmB.title },
+  cinema: { id: cinemaB.id, name: cinemaB.name, city: cinemaB.city },
+  screenName: 'Screen 1',
+  startsAt: '2026-10-01T19:00:00.000Z',
+  basePrice: 1200,
   status: 'scheduled',
+  totalSeats: 1,
   availableSeats: 0,
-  totalSeats: 12,
 }
 
-export const eventDetailA: EventDetail = {
-  ...eventSummaryA,
-  seats: eventSeats,
+export const showtimeDetailA: ShowtimeDetailResponse = {
+  showtime: showtimeSummaryA,
+  seats: showtimeSeats,
 }
 
-export const adminEventA: AdminEvent = {
-  ...eventSummaryA,
+export const adminShowtimeA: AdminShowtime = {
+  ...showtimeSummaryA,
   revenue: 45500,
   bookingCount: 7,
 }
 
-export const adminEventB: AdminEvent = {
-  ...eventSummaryB,
+export const adminShowtimeB: AdminShowtime = {
+  ...showtimeSummaryB,
   revenue: 0,
   bookingCount: 0,
 }
 
-export const bookingPending: Booking = {
+export const createHoldResponseA: CreateHoldResponse = {
+  holdId: 'hold-1',
+  expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  amountMinor: 350000,
+  currency: 'lkr',
+}
+
+export const holdA: Hold = {
+  holdId: 'hold-1',
+  showtimeId: showtimeSummaryA.id,
+  seatIds: ['A-1', 'A-2'],
+  seatSnapshot: [
+    { id: 'A-1', section: 'STANDARD', price: 1500 },
+    { id: 'A-2', section: 'STANDARD', price: 1500 },
+  ],
+  totalPrice: 3000,
+  amountMinor: 300000,
+  currency: 'lkr',
+  status: 'active',
+  expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  paymentIntentId: null,
+}
+
+export const createHoldPaymentIntentResponseA: CreateHoldPaymentIntentResponse = {
+  clientSecret: 'pi_test_secret',
+  publishableKey: 'pk_test_x',
+  expiresAt: holdA.expiresAt,
+  amount: holdA.amountMinor,
+}
+
+export const bookingConfirmed: Booking = {
   id: 'booking-1',
   reference: 'ENC-4471',
   userId: customerUser.id,
   user: { id: customerUser.id, name: customerUser.name, email: customerUser.email },
-  event: { id: eventSummaryA.id, title: eventSummaryA.title, artist: eventSummaryA.artist, date: eventSummaryA.date, status: eventSummaryA.status },
-  seats: [{ id: 'A-1', section: 'STALLS', row: 'A', number: 1, price: 6500 }],
-  totalPrice: 6500,
-  status: 'pending',
-  holdExpiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-  payment: null,
+  showtime: { id: showtimeSummaryA.id, screenName: showtimeSummaryA.screenName, startsAt: showtimeSummaryA.startsAt },
+  seats: [{ id: 'A-1', section: 'STANDARD', row: 'A', number: 1, price: 1500 }],
+  totalPrice: 1500,
+  status: 'confirmed',
+  paymentIntentId: 'pi_test_123',
+  paymentStatus: 'succeeded',
   createdAt: '2026-08-01T00:00:00.000Z',
 }
 
-export const bookingConfirmed: Booking = {
-  ...bookingPending,
+export const bookingCancelled: Booking = {
+  ...bookingConfirmed,
   id: 'booking-2',
   reference: 'ENC-9001',
-  status: 'confirmed',
-  holdExpiresAt: null,
-  payment: {
-    provider: 'stripe',
-    sessionId: 'cs_test_123',
-    paymentIntentId: 'pi_test_123',
-    status: 'succeeded',
-    amountMinor: 650000,
-    currency: 'lkr',
-    refundId: null,
-  },
+  status: 'cancelled',
+  paymentStatus: 'succeeded',
+}
+
+// A cancelled booking whose payment was actually refunded — distinct from
+// `bookingCancelled` above, which models a cancellation that hasn't (yet)
+// been refunded, so tests can tell the two badge states apart.
+export const bookingRefunded: Booking = {
+  ...bookingConfirmed,
+  id: 'booking-3',
+  reference: 'ENC-9002',
+  status: 'cancelled',
+  paymentStatus: 'refunded',
 }
 
 export const adminStats: AdminStats = {
-  totalEvents: 2,
-  upcomingEvents: 2,
+  totalShowtimes: 2,
+  upcomingShowtimes: 2,
   totalBookings: 10,
   confirmedBookings: 7,
   cancelledBookings: 3,

@@ -13,9 +13,16 @@
   --stamp-red: #c8102e;
   --marquee-gold: #e4b04a;
   --ticket-paper: #f3eee3;
-  --stage-green: #3a7d6e;
+  --seat-free: #3a7d6e;
   --ash: #8a8178;
   --seat-taken: #b8afa4;
+
+  /* Seat-tier outline/border accents — outline use ONLY, never fill (fill is
+     reserved exclusively for availability status: available/held/booked/
+     selected, per NFR-20). Subtle tints derived from existing hues. */
+  --tier-standard-outline: rgba(138, 129, 120, 0.35);
+  --tier-premium-outline: rgba(228, 176, 74, 0.65);
+  --tier-recliner-outline: rgba(200, 16, 46, 0.45);
 
   /* Derived surfaces */
   --bg: #f3eee3;
@@ -39,6 +46,10 @@
   --status-cancelled-fg: #a32d2d;
   --status-neutral-bg: #f1efe8;
   --status-neutral-fg: #444441;
+  /* Deliberately a distinct violet family from Cancelled — Refunded marks
+     the money as actually returned, not merely that the booking is void. */
+  --status-refunded-bg: #edeaf6;
+  --status-refunded-fg: #4b3f8f;
 
   /* Type */
   --font-voice: 'Fraunces', Georgia, 'Times New Roman', serif;
@@ -89,9 +100,13 @@
   --color-stamp-red: var(--stamp-red);
   --color-marquee-gold: var(--marquee-gold);
   --color-ticket-paper: var(--ticket-paper);
-  --color-stage-green: var(--stage-green);
+  --color-seat-free: var(--seat-free);
   --color-ash: var(--ash);
   --color-seat-taken: var(--seat-taken);
+
+  --color-tier-standard-outline: var(--tier-standard-outline);
+  --color-tier-premium-outline: var(--tier-premium-outline);
+  --color-tier-recliner-outline: var(--tier-recliner-outline);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

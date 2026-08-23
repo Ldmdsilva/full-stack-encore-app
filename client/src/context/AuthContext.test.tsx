@@ -47,15 +47,25 @@ describe('AuthContext', () => {
     expect(result.current.isAdmin).toBe(true)
   })
 
-  it('registers a new account', async () => {
+  it('registers a new account without authenticating (D14 — register never issues a token)', async () => {
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider })
     await waitFor(() => expect(result.current.status).toBe('anonymous'))
 
+    let response: { message: string } | undefined
     await act(async () => {
-      await result.current.register({ name: 'New', email: 'new@example.com', password: 'password123', phone: '0771234567' })
+      response = await result.current.register({
+        name: 'New',
+        email: 'new@example.com',
+        password: 'password123',
+        phone: '0771234567',
+      })
     })
 
-    expect(result.current.status).toBe('authenticated')
+    expect(response?.message).toEqual(expect.any(String))
+    expect(response?.message.length).toBeGreaterThan(0)
+    expect(result.current.status).toBe('anonymous')
+    expect(result.current.user).toBeNull()
+    expect(result.current.token).toBeNull()
   })
 
   it('updates the profile in place', async () => {

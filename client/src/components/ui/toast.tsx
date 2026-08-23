@@ -61,7 +61,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               <Icon
                 className={cn(
                   'mt-0.5 size-4 shrink-0',
-                  t.variant === 'success' && 'text-stage-green',
+                  t.variant === 'success' && 'text-seat-free',
                   t.variant === 'error' && 'text-[#f0a3a3]',
                   t.variant === 'info' && 'text-marquee-gold',
                 )}

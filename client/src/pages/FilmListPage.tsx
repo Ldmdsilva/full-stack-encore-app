@@ -5,25 +5,21 @@ import { Input, Select } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
-import { EventCard } from '@/components/EventCard'
+import { FilmCard } from '@/components/FilmCard'
 import { useAsync } from '@/hooks/useAsync'
-import * as eventsApi from '@/lib/api/events'
-import * as venuesApi from '@/lib/api/venues'
+import * as filmsApi from '@/lib/api/films'
 
 const PAGE_SIZE = 9
 
 // A fixed genre list keeps the filter usable even before the first page of
-// events has loaded — the server's `genre` field is free text, so this is a
+// films has loaded — the server's `genre` field is free text, so this is a
 // curated set of the genres the seed data uses rather than an enum.
-const GENRES = ['Folk', 'Soul', 'Contemporary', 'Synth-pop', 'Choral', 'Post-rock']
+const GENRES = ['Drama', 'Comedy', 'Action', 'Thriller', 'Mystery', 'Music', 'Animation', 'Documentary']
 
-export function EventListPage() {
+export function FilmListPage() {
   const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''
-  const venue = params.get('venue') ?? ''
   const genre = params.get('genre') ?? ''
-  const from = params.get('from') ?? ''
-  const to = params.get('to') ?? ''
   const page = Number(params.get('page') ?? '1')
 
   const [search, setSearch] = React.useState(q)
@@ -67,35 +63,28 @@ export function EventListPage() {
 
   const { status, data, error, retry } = useAsync(
     () =>
-      eventsApi.list({
+      filmsApi.list({
         page,
         limit: PAGE_SIZE,
-        artist: q || undefined,
         genre: genre || undefined,
-        from: from || undefined,
-        to: to || undefined,
-        venue: venue || undefined,
+        search: q || undefined,
       }),
-    [q, venue, genre, from, to, page],
-    { isEmpty: (d) => d.events.length === 0 },
+    [q, genre, page],
+    { isEmpty: (d) => d.items.length === 0 },
   )
 
-  const hasFilters = q || venue || genre || from || to
+  const hasFilters = q || genre
   const clear = () => {
     setSearch('')
     setParams({}, { replace: true })
   }
-
-  const venuesState = useAsync(() => venuesApi.list(), [])
-  const venueOptions =
-    venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
 
   return (
     <>
       {/* Hero */}
       <section className="border-b-[0.5px] border-border">
         <div className="mx-auto max-w-6xl px-5 py-14 sm:py-20">
-          <p className="eyebrow text-stamp-red">Now on sale · Autumn 2026</p>
+          <p className="eyebrow text-stamp-red">Now showing · Autumn 2026</p>
           <h1 className="mt-4 max-w-3xl font-voice text-[44px] font-medium leading-[1.02] tracking-[-0.02em] sm:text-[64px]">
             Every seat is a{' '}
             <span className="italic text-stamp-red">ticket</span> you can
@@ -103,7 +92,7 @@ export function EventListPage() {
           </h1>
           <p className="mt-5 max-w-xl text-[17px] leading-[1.7] text-text-secondary">
             Live seat maps, honest availability, and a printed-stub confirmation
-            for every show. Pick your seat and watch the house fill in real time.
+            for every screening. Pick your film and choose a showtime that suits you.
           </p>
         </div>
       </section>
@@ -115,25 +104,12 @@ export function EventListPage() {
             <Search className="pointer-events-none absolute left-3 top-[34px] size-4 text-text-muted" />
             <Input
               label="Search"
-              placeholder="Artist or show name"
+              placeholder="Film title"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
             />
           </div>
-          <Select
-            label="Venue"
-            value={venue}
-            onChange={(e) => setParam('venue', e.target.value)}
-            className="md:w-48"
-          >
-            <option value="">All venues</option>
-            {venueOptions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </Select>
           <Select
             label="Genre"
             value={genre}
@@ -147,20 +123,6 @@ export function EventListPage() {
               </option>
             ))}
           </Select>
-          <Input
-            label="From"
-            type="date"
-            value={from}
-            onChange={(e) => setParam('from', e.target.value)}
-            className="md:w-40"
-          />
-          <Input
-            label="To"
-            type="date"
-            value={to}
-            onChange={(e) => setParam('to', e.target.value)}
-            className="md:w-40"
-          />
           {hasFilters && (
             <Button variant="ghost" size="md" onClick={clear} className="shrink-0">
               <X className="size-4" />
@@ -173,26 +135,26 @@ export function EventListPage() {
       {/* Results */}
       <section className="mx-auto max-w-6xl px-5 py-10">
         <div className="mb-6 flex items-baseline justify-between">
-          <h2 className="text-[22px] font-medium">Upcoming concerts</h2>
+          <h2 className="text-[22px] font-medium">Now showing</h2>
           {(status === 'success' || status === 'empty') && (
             <p className="font-mono text-[13px] text-text-muted">
-              {data.total} {data.total === 1 ? 'show' : 'shows'}
+              {data.total} {data.total === 1 ? 'film' : 'films'}
             </p>
           )}
         </div>
 
-        {status === 'loading' && <Spinner label="Loading concerts…" />}
+        {status === 'loading' && <Spinner label="Loading films…" />}
 
         {status === 'error' && <ErrorState description={error.message} onRetry={retry} />}
 
         {status === 'empty' && (
           <div className="rounded-[var(--radius-card)] border-[0.5px] border-dashed border-border-strong px-6 py-16 text-center">
             <h3 className="font-voice text-[24px] font-medium">
-              No concerts match your search
+              No films match your search
             </h3>
             <p className="mx-auto mt-2 max-w-sm text-[15px] text-text-secondary">
-              Try a different artist, venue, or genre — or clear your filters to
-              see everything on sale.
+              Try a different title or genre — or clear your filters to see
+              everything showing.
             </p>
             <Button variant="secondary" size="md" onClick={clear} className="mt-6">
               Clear filters
@@ -203,8 +165,8 @@ export function EventListPage() {
         {status === 'success' && (
           <>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {data.events.map((e) => (
-                <EventCard key={e.id} event={e} />
+              {data.items.map((f) => (
+                <FilmCard key={f.id} film={f} />
               ))}
             </div>
 
