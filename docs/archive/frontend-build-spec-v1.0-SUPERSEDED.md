@@ -1,3 +1,16 @@
+> ## ⚠️ SUPERSEDED — v1.0 Frontend Build Spec (archived)
+>
+> This document is an early design-tool artifact for a **concert/live-events** ticketing app ("Encore") and is kept only as historical evidence of drift for the report's Evaluation section — it does not describe the current implementation and should not be used as a build reference.
+>
+> | Aspect | v1.0 spec (this file) | Current implementation |
+> |---|---|---|
+> | React version | React 18 | React 19 (`client/package.json`: `react@^19.0.0`) |
+> | Router version | React Router v6 | React Router 7 (`client/package.json`: `react-router-dom@^7.18.2`) |
+> | Styling approach | Plain CSS with custom properties, no CSS framework | Tailwind CSS v4 via `@tailwindcss/vite` (`client/src/index.css`: `@import 'tailwindcss'`) |
+> | Domain | Concert / live-events ticket booking | Cinema / film booking |
+
+---
+
 # Encore Frontend — Complete Build Specification
 
 **Use this as the single source of truth for building the Encore client.** It is written to be handed to a coding assistant or worked through manually, section by section.

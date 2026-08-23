@@ -1,6 +1,6 @@
 # Encore — Static Analysis Report
 
-**Companion document to** `docs/encore-PID-SRS.md` §D4.7 (Static analysis). This is a **point-in-time snapshot**, captured by actually running the project's lint, type-check, test, and line-count tooling at the end of implementation — not an estimate. This supersedes an earlier draft of this document captured mid-implementation, which recorded a non-zero error count against code that was, at that point, still under active concurrent development; every issue that draft identified has since been fixed and is verified clean below.
+**Companion document to** `docs/encore-cinema-PID-SRS.md` §D4.7 (Static analysis). This is a **point-in-time snapshot**, captured by actually running the project's lint, type-check, test, and line-count tooling at the end of implementation — not an estimate. This supersedes an earlier draft of this document captured mid-implementation, which recorded a non-zero error count against code that was, at that point, still under active concurrent development; every issue that draft identified has since been fixed and is verified clean below.
 
 **How to reproduce this report:**
 
@@ -95,4 +95,42 @@ A six-agent audit pass against the plan surfaced and this report's authors then 
 
 ## 7. Playwright E2E suite
 
-Six spec files exist under `QA/e2e/`, one per SRS §D4.4 journey, enumerating 8 tests via `npx playwright test --list --config=QA/playwright.config.ts`. They type-check cleanly and are structurally verified, but could not be run live in this environment — no real MongoDB or Stripe test-mode credentials are available in this sandbox, and `bookingService.createBooking` genuinely calls the live Stripe API to open a seat hold, so most journeys require both before they can execute. Run this suite for real, on demand and at the next milestone, with real credentials configured.
+Six spec files exist under `e2e/` at the repo root, one per SRS §D4.4 journey, enumerating 8 tests via `npx playwright test --list --config=playwright.config.ts`. They type-check cleanly and are structurally verified, but could not be run live in this environment — no real MongoDB or Stripe test-mode credentials are available in this sandbox, and `bookingService.createBooking` genuinely calls the live Stripe API to open a seat hold, so most journeys require both before they can execute. Run this suite for real, on demand and at the next milestone, with real credentials configured.
+
+## 8. Regeneration protocol
+
+**Every metric in §1–§7 above (line counts, lint results, type-check results, coverage percentages, test/suite counts) was captured against the pre-migration, concert-domain codebase.** The cinema-domain migration renames and restructures source files (e.g. `eventService.js` / `venueService.js` and their tests are being replaced by film/cinema/showtime equivalents), which invalidates every number above even where the underlying logic is unchanged. **Do not hand-adjust the old figures.** Once the migration lands, regenerate this entire document from scratch as follows:
+
+1. **Confirm the working tree is the post-migration state** (correct branch, dependencies installed with `npm install` in both `server/` and `client/`).
+2. **Lint, from the repo root:**
+   ```bash
+   npm run lint
+   ```
+   Transcribe the exact error/warning counts (and any remaining file/rule detail worth keeping, per §2) into §2 for server and client separately — the script runs both (`npm --prefix server run lint && npm --prefix client run lint`).
+3. **Type-check, from the repo root:**
+   ```bash
+   npm run typecheck
+   ```
+   Record the exact error count into §3 (this only covers the client; the server remains plain JavaScript per ADR-008).
+4. **Server tests with coverage, from the repo root:**
+   ```bash
+   npm run test:server -- --coverage
+   ```
+   Transcribe the real suite/test counts and the actual coverage percentages against each threshold in `server/package.json`'s `jest.coverageThreshold` into §4.
+5. **Client tests with coverage, from the repo root:**
+   ```bash
+   npm run test:client -- --coverage
+   ```
+   Transcribe the real suite/test counts and the actual lines/statements/branches/functions percentages into §6. Note any genuine defects the suite catches (as §6 did for the pre-migration run) rather than only the headline numbers.
+6. **E2E suite, from the repo root:**
+   ```bash
+   npm run test:e2e
+   ```
+   or, to re-enumerate without executing, `npx playwright test --list --config=playwright.config.ts`. Update the spec-file and test counts in §7, and actually run the suite (not just list it) whenever real MongoDB and Stripe test-mode credentials are available — this environment could only verify the suite structurally.
+7. **Codebase size:**
+   ```bash
+   git ls-files server/src server/tests client/src | xargs wc -l
+   ```
+   Re-scope the `find`/`wc` counts in §1 to whatever the post-migration directory layout actually is (file and folder names will have changed with the domain rename) rather than assuming the old paths still apply.
+8. **Rewrite §1–§7 in place** using only the numbers actually produced by the commands above — do not average, estimate, or carry forward any pre-migration figure. If a command's output contradicts a claim elsewhere in this document (e.g. a previously-accepted warning that no longer appears, or a new one that does), update the prose, not just the table.
+9. **Update this file's opening paragraph** to record the new capture date and confirm it is again a point-in-time snapshot of a real run, not an estimate.

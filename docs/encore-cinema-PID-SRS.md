@@ -5,9 +5,9 @@
 **Module:** PUSL3120 Full-Stack Development
 **Deliverable:** Full-Stack Project (100% coursework)
 **Document type:** Project Initiation Document with embedded Software Requirements Specification (SRS) and Architecture Decision Records (ADRs)
-**Author:** [Your full name — use your real name for GitHub]
-**Version:** 3.2
-**Date:** [Insert date]
+**Author:** Dilmi Manodya
+**Version:** 3.3
+**Date:** 2026-08-23
 
 ---
 
@@ -24,19 +24,20 @@
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| 1.0 | [date] | [you] | Baselined after requirements review |
-| 2.0 | [date] | [you] | Added ADRs, API contracts, data flow, scale estimates, error handling, expanded test strategy |
-| 2.1 | [date] | [you] | Switched persistence to MongoDB Atlas (ADR-007) |
-| 2.2 | [date] | [you] | Fixed language split — TypeScript client, JavaScript server (ADR-008) |
-| 3.2 | [date] | [you] | Payment confirmation switched from webhooks to server-side PaymentIntent retrieval (ADR-014, supersedes ADR-009); reconciliation promoted from backstop to core requirement |
-| 3.1 | [date] | [you] | Added Redis for shared ephemeral state and catalogue caching (ADR-013, supersedes ADR-006); closes the FR-15 session-invalidation gap that stateless JWT could not deliver |
-| **3.0** | [date] | [you] | **Domain changed from live concerts to cinema. Added Stripe payments (ADR-009), Nodemailer + Notify.lk notifications (ADR-010), production-grade auth with email verification and password reset (ADR-011). ADR-004 superseded by ADR-012 (TTL seat hold) as payment latency invalidates the previous concurrency model.** |
+| 1.0 | 2026-08-23 | Dilmi Manodya | Baselined after requirements review |
+| 2.0 | 2026-08-23 | Dilmi Manodya | Added ADRs, API contracts, data flow, scale estimates, error handling, expanded test strategy |
+| 2.1 | 2026-08-23 | Dilmi Manodya | Switched persistence to MongoDB Atlas (ADR-007) |
+| 2.2 | 2026-08-23 | Dilmi Manodya | Fixed language split — TypeScript client, JavaScript server (ADR-008) |
+| 3.0 | 2026-08-23 | Dilmi Manodya | **Domain changed from live concerts to cinema. Added Stripe payments (ADR-009), Nodemailer + Notify.lk notifications (ADR-010), production-grade auth with email verification and password reset (ADR-011). ADR-004 superseded by ADR-012 (TTL seat hold) as payment latency invalidates the previous concurrency model.** |
+| 3.1 | 2026-08-23 | Dilmi Manodya | Added Redis for shared ephemeral state and catalogue caching (ADR-013, supersedes ADR-006); closes the FR-15 session-invalidation gap that stateless JWT could not deliver |
+| 3.2 | 2026-08-23 | Dilmi Manodya | Payment confirmation switched from webhooks to server-side PaymentIntent retrieval (ADR-014, supersedes ADR-009); reconciliation promoted from backstop to core requirement |
+| **3.3** | 2026-08-23 | Dilmi Manodya | **Cinema-migration SRS amendments: catalogue entity renamed to Film throughout (see glossary, §C1.3); ADR-013 revised to "Option D" — MongoDB TTL collections (`revokedtokens`, `ratelimits`) replace Redis entirely, dropping catalogue caching and the compliance risk (R20–R22 retired, replaced by two Option-D-specific risks); Hold promoted to its own collection (no TTL index — the reconciliation record must survive expiry); seat tiers (STANDARD/PREMIUM/RECLINER) formalised in the glossary and data model; `POST /api/holds` split from `POST /api/holds/:id/payment-intent`; registration now returns 202 with no token; dev-only `GET /api/dev/last-mail` added; socket events renamed to the showtime domain and `booking:updated` added; corrected a dozen cross-reference and count errors (ADR citations, invalid compound index, seat-cap figures, e2e journey numbering).** |
 
 **Contents**
 
 - **Part A — Project Initiation Document** (§A1–A13)
 - **Part B — Architecture Decision Records** (ADR-001 to ADR-014)
-- **Part C — Software Requirements Specification** (§C1–C10)
+- **Part C — Software Requirements Specification** (§C1–C9)
 - **Part D — Test Strategy and Plan** (§D1–D8)
 - **Appendix** — coursework requirement checklist
 
@@ -71,7 +72,7 @@ Encore Cinemas addresses this with a purpose-built platform where seat state is 
 | O1 | Deliver a working distributed full-stack system | Client and API run as separate containers via `docker-compose`; data tier on managed MongoDB Atlas — three independently hosted tiers |
 | O2 | Real-time multi-client behaviour | A seat held or booked on one client updates on all others within 1s (p95) via WebSocket |
 | O3 | Production-grade authentication | Email verification required before booking; password reset via hashed single-use token; bcrypt hashing; rate-limited auth endpoints; zero unauthenticated writes |
-| O4 | CRUD for ≥3 entities | Full CRUD for User, Movie, Cinema, Showtime, and Booking — five entities |
+| O4 | CRUD for ≥3 entities | Full CRUD for User, Film, Cinema, Showtime, and Booking — five entities |
 | O5 | Demonstrable quality | ≥70% line coverage on server; unit, integration, system, and usability tests documented; ESLint and `tsc` clean |
 | O6 | Automated pipeline | GitHub Actions runs lint, type-check, and tests on every push; green build on `main` |
 | O7 | Data integrity | Zero double-bookings under a 50-concurrent-request test on a single seat |
@@ -89,14 +90,14 @@ Encore Cinemas addresses this with a purpose-built platform where seat state is 
 - **Payments:** Stripe PaymentIntent flow in **test mode**, confirmed by server-side retrieval using the secret key (ADR-014), with a mandatory reconciliation job.
 - **Notifications:** transactional email via Nodemailer (verification, password reset, booking confirmation, showtime cancellation) and SMS via Notify.lk (booking confirmation, showtime cancellation).
 - **Realtime:** Socket.IO broadcasting seat hold, release, and booking events per showtime.
-- **CRUD** for User, Movie, Cinema (with Screens), Showtime, and Booking.
+- **CRUD** for User, Film, Cinema (with Screens), Showtime, and Booking.
 - Automated test suites, CI/CD pipeline, containerised deployment.
 
 ### A4.2 Out of scope
 
 - **Live payment processing.** Stripe operates in test mode only, using Stripe's published test card numbers. No real money moves and no real card data is handled at any point.
 - Physical ticket printing, barcode scanning at the door, or POS integration.
-- Seat pricing tiers beyond a per-showtime price (no dynamic or surge pricing).
+- **Dynamic or surge pricing** — a seat's price never varies with demand, time-to-showtime, or booking volume. (This is separate from the fixed **seat tiers** STANDARD/PREMIUM/RECLINER, which *are* in scope — D8, §C1.3, §C6.2 — and simply set a per-section multiplier on a showtime's `basePrice`, frozen at creation.)
 - Loyalty schemes, gift cards, or refunds to arbitrary payment methods.
 - Native mobile apps.
 - Horizontal scaling of the WebSocket layer across multiple server instances (see ADR-003).
@@ -105,7 +106,7 @@ Encore Cinemas addresses this with a purpose-built platform where seat state is 
 
 - **Technology constraint (from brief):** React frontend (TypeScript permitted); Node.js-only backend (JavaScript); MongoDB only; WebSockets mandatory; no other server or language permitted.
 - **Third-party services:** Stripe, Nodemailer/SMTP, and Notify.lk are external SaaS APIs consumed over HTTPS from the Node.js backend. They are **not additional backend servers** in the sense the brief prohibits — no additional application server or language is introduced into the stack. *Action: confirm this reading with the module leader early.*
-- **Redis (⚠️ compliance risk):** the brief states that "other types of database are not permitted." Redis is used here strictly as **infrastructure, not as a database**: MongoDB remains the sole system of record, and everything held in Redis is ephemeral, derived, and fully reconstructible by discarding it (ADR-013). This reading is defensible but **is not certain**. *Action: obtain the module leader's confirmation in writing before Sprint 5. If the answer is no, ADR-013 Option D is the documented fallback — revocation and rate limiting move to MongoDB TTL collections and caching is dropped, at the cost of nothing currently in scope.*
+- **No second database (compliance, resolved):** the brief states that "other types of database are not permitted." Earlier drafts of this document proposed Redis for shared ephemeral state and were carried under a written compliance risk (R20). That risk is retired: ADR-013 now adopts **Option D** — two MongoDB TTL collections (`revokedtokens`, `ratelimits`) — so MongoDB remains the sole datastore of any kind, and the compliance question does not arise at all.
 - **Assumption:** peak concurrency is modest (§A7); a single API instance suffices.
 - **Assumption:** Notify.lk is appropriate as the SMS gateway given a Sri Lankan user base; international numbers may not be deliverable, so SMS is treated as best-effort and email as the primary channel.
 - **Assumption:** screen seat layouts are fixed per screen and do not change once showtimes are published.
@@ -128,7 +129,7 @@ Encore Cinemas addresses this with a purpose-built platform where seat state is 
 
 ### A6.1 Architectural style
 
-A **modular monolith** on the server (a single deployable Node.js process with strict internal layering) behind a React SPA, with MongoDB Atlas as the system of record, Redis for shared ephemeral state (ADR-013), Socket.IO for realtime, and three outbound third-party integrations. Rationale and alternatives are in **ADR-001**.
+A **modular monolith** on the server (a single deployable Node.js process with strict internal layering) behind a React SPA, with MongoDB Atlas as the system of record for both durable and ephemeral state (ADR-013 Option D), Socket.IO for realtime, and three outbound third-party integrations. Rationale and alternatives are in **ADR-001**.
 
 ### A6.2 Component diagram
 
@@ -157,18 +158,14 @@ A **modular monolith** on the server (a single deployable Node.js process with s
     └───┬─────────┬─────────┬──────│─────┘      │
         │         │         │      │            │
         │         │         │      │ TLS        │
-        │         │         │  ┌───▼─────────┐  │
-        │         │         │  │ MongoDB     │  │
-        │         │         │  │ Atlas       │  │
-        │         │         │  │ SYSTEM OF   │  │
-        │         │         │  │ RECORD      │  │
-        │         │         │  └─────────────┘  │
-        │         │         │  ┌─────────────┐  │
-        │         │         │  │ Redis       │  │
-        │         │         │  │ (container) │  │
-        │         │         │  │ ephemeral   │  │
-        │         │         │  │ ONLY        │  │
-        │         │         │  └─────────────┘  │
+        │         │         │  ┌────────────────┐  │
+        │         │         │  │ MongoDB Atlas  │  │
+        │         │         │  │ SYSTEM OF      │  │
+        │         │         │  │ RECORD, plus   │  │
+        │         │         │  │ TTL collections│  │
+        │         │         │  │ revokedtokens, │  │
+        │         │         │  │ ratelimits     │  │
+        │         │         │  └────────────────┘  │
         │         │         │                   │
    ┌────▼────┐ ┌──▼──────┐ ┌▼──────────┐        │
    │ SMTP    │ │Notify.lk│ │  Stripe   │◀───────┘
@@ -181,9 +178,9 @@ A **modular monolith** on the server (a single deployable Node.js process with s
                           │ asserts that payment succeeded
 ```
 
-**Deployment topology:** three locally orchestrated containers (client, API, Redis) plus a managed Atlas replica set hosted externally — four independently hosted tiers, satisfying the brief's distribution requirement.
+**Deployment topology:** two locally orchestrated containers (client, API) plus a managed Atlas replica set hosted externally — three independently hosted tiers, satisfying the brief's distribution requirement. There is no Redis (or any other second database) container — ADR-013 Option D holds all shared ephemeral state in MongoDB alongside the durable data.
 
-**Data authority:** MongoDB Atlas is the sole system of record. Redis holds only ephemeral, derived state that can be discarded and rebuilt without data loss (ADR-013). **Seat state is never cached.** Three outbound SaaS integrations complete the picture. **All traffic is outbound** — no inbound webhook endpoint is required (ADR-014).
+**Data authority:** MongoDB Atlas is the sole system of record, **and the sole datastore of any kind** — durable collections (users, films, cinemas, showtimes, bookings, holds) and ephemeral TTL collections (`revokedtokens`, `ratelimits`) live side by side in the same cluster (ADR-013). **Seat state is never cached.** Three outbound SaaS integrations complete the picture. **All traffic is outbound** — no inbound webhook endpoint is required (ADR-014), and the legacy webhook route has been removed (D7).
 
 **Critical security properties:** (1) card details are entered into a Stripe-hosted iframe (Stripe Elements) and travel directly from the browser to Stripe — they never reach the Encore client bundle, API, or database; (2) payment status is obtained by the **server** calling Stripe with its secret key, never from a client claim. See **ADR-009** and **ADR-014**.
 
@@ -199,7 +196,7 @@ A **modular monolith** on the server (a single deployable Node.js process with s
 | Socket gateway | Socket.IO | Room management; broadcast hold/release/book events |
 | Scheduler | `node-cron` or interval | Sweep expired seat holds; retry failed notifications |
 | Integrations | Stripe SDK, Nodemailer, Notify.lk HTTP client | Isolated adapters, each behind a service interface for testability |
-| Cache / ephemeral | Redis (`ioredis`) | Rate-limit counters, JWT denylist, catalogue cache, socket pub/sub. **Never seat state** |
+| Ephemeral state | MongoDB TTL collections | Rate-limit counters (`ratelimits`), JWT revocation (`revokedtokens`). **Never seat state, never a catalogue cache** (ADR-013 Option D) |
 | Models | Mongoose | Schema, validation, indexes, atomic operations |
 | Data | MongoDB Atlas | Persistence — the sole system of record |
 
@@ -216,7 +213,6 @@ The system now holds **five** categories of secret. Every one is a credential, a
 | `STRIPE_SECRET_KEY` | Server-side Stripe API calls | Account access; financial exposure |
 | `SMTP_USER` / `SMTP_PASS` | Nodemailer transport | Mail relay abuse; phishing from your domain |
 | `NOTIFY_LK_API_KEY` / `NOTIFY_LK_USER_ID` | SMS gateway | Billed SMS spend; SMS spoofing |
-| `REDIS_URL` | Cache, rate limits, token denylist | Cache poisoning; rate-limit bypass; forged revocation state |
 
 **Client-side variables are public.** Only `VITE_STRIPE_PUBLISHABLE_KEY` and `VITE_API_URL` may appear in the client. A publishable key is designed to be public; a **secret key must never** appear in client code, since anything in the bundle is readable by anyone.
 
@@ -242,15 +238,16 @@ Payment introduces seconds of latency between seat selection and confirmation. T
  1. Client   GET /api/showtimes/:id                → showtime + seat states
  2. Client   socket.emit('join:showtime', id)      → joins room `showtime:<id>`
  3. User selects seats (client-side state only)
- 4. Client   POST /api/holds {showtimeId, seatIds} + JWT
+ 4. Client   POST /api/holds {showtimeId, seatIds} + JWT   ← creates the Hold ONLY, no Stripe call (D12)
  5. Server   atomic conditional update: seats available → held,
              holdRef = <id>, holdExpiresAt = now + 10 min
  5a. matchedCount = 0 → 409 SEAT_UNAVAILABLE
- 5b. success        → broadcast 'seats:updated' {status:'held'}
- 6. Server   create Stripe PaymentIntent (amount computed SERVER-SIDE)
+ 5b. success        → broadcast 'seats:updated' {status:'held'}; → 201 {holdId, expiresAt, amountMinor}
+ 6. Client   POST /api/holds/:id/payment-intent            ← separate call creates the Stripe PaymentIntent (D12)
+ 6a. Server  create Stripe PaymentIntent (amount computed SERVER-SIDE)
              metadata: {holdId, showtimeId, userId}
              idempotency key: holdId
- 7. Server   → 201 {holdId, clientSecret, expiresAt, amount}
+ 7. Server   → 201 {clientSecret, expiresAt, amount}
  8. Client   mounts Stripe Elements with clientSecret; user enters card
              (card data goes browser → Stripe directly, never via our API)
  9. Client   stripe.confirmPayment() → Stripe processes the charge
@@ -270,6 +267,8 @@ Payment introduces seconds of latency between seat selection and confirmation. T
 16. Server   enqueue notifications (email + SMS) — async, non-blocking
 17. Server   → 200 {booking}  → client routes to confirmation
 ```
+
+**Why holds and PaymentIntents are separate calls (D12).** `POST /api/holds` only reserves seats — it makes no Stripe call and needs no Stripe keys at all. `POST /api/holds/:id/payment-intent` is a distinct follow-up call that creates the PaymentIntent for an existing hold. Splitting them lets the realtime-propagation and hold-expiry e2e journeys (§D4.4) exercise the full hold lifecycle without any Stripe key configured.
 
 **Why step 10 is safe.** The client supplies only a `holdId`. It cannot claim a payment succeeded, cannot supply an amount, and cannot nominate a PaymentIntent. Every fact used to authorise the booking is fetched by the server from Stripe in step 12. A forged request for someone else's hold fails at step 11; a request whose payment did not actually succeed fails at step 13.
 
@@ -301,7 +300,7 @@ Step 16 being outside the transaction is deliberate: a customer who has paid mus
 | Emails per day | ~700 | Verification + confirmation + reset |
 | SMS per day | ~500 | Booking confirmations |
 | Data volume (1 year) | < 1 GB | Bookings and showtimes dominate |
-| Redis working set | < 20 MB | Catalogue cache, rate counters, short-lived denylist entries |
+| TTL collection working set | < 20 MB | `revokedtokens` and `ratelimits` — both bounded by short expiry (ADR-013 Option D) |
 
 **Conclusion:** a single API instance and a shared-tier Atlas cluster are sufficient. SMTP and SMS volumes sit within free/low-cost tiers. Horizontal scaling is explicitly deferred (§A4.2).
 
@@ -318,12 +317,12 @@ Step 16 being outside the transaction is deliberate: a customer who has paid mus
 
 | Sprint | Focus | Key outputs | Exit criteria |
 |---|---|---|---|
-| S0 — Setup | Repo, tooling, CI, Atlas, Redis container, secrets, Stripe/SMTP/Notify.lk test accounts; **confirm Redis compliance with module leader** | ESLint + Jest + `tsc` configured; `.env` ignored | Empty pipeline green; API connects to Atlas and Redis; no secrets in git; written answer on Redis recorded in ADR-013 |
+| S0 — Setup | Repo, tooling, CI, Atlas, secrets, Stripe/SMTP/Notify.lk test accounts | ESLint + Jest + `tsc` configured; `.env` ignored | Empty pipeline green; API connects to Atlas; no secrets in git |
 | S1 — Auth core | User model, register, login, JWT, bcrypt | Auth endpoints + unit tests | FR-1–5 pass |
 | S2 — Auth hardening | Email verification, forgot/reset password, rate limiting, Nodemailer | Verification + reset flows working end to end | FR-6–12 pass; tokens hashed, single-use, TTL-bound |
-| S3 — Catalogue CRUD | Movie, Cinema/Screen, Showtime models + endpoints | CRUD for all catalogue entities | All CRUD integration tests green |
+| S3 — Catalogue CRUD | Film, Cinema/Screen, Showtime models + endpoints | CRUD for all catalogue entities | All CRUD integration tests green |
 | S4 — Holds + realtime | Socket.IO, seat holds, expiry sweeper, concurrency | Live seat state; hold lifecycle | O7 met (zero double-bookings) |
-| S5 — Payments + Redis | Stripe PaymentIntent, Elements, **server-side retrieval confirm**, idempotency index, **reconciliation job**; Redis for rate limits, `jti` denylist, catalogue cache | Paid booking flow end to end; revocation working | O8 met; abandoned-tab booking completed by reconciliation; a pre-reset token is rejected after reset |
+| S5 — Payments + revocation | Stripe PaymentIntent, Elements, **server-side retrieval confirm**, idempotency index, **reconciliation job**; MongoDB TTL collections for rate limits and `jti` revocation (ADR-013 Option D) | Paid booking flow end to end; revocation working | O8 met; abandoned-tab booking completed by reconciliation; a pre-reset token is rejected after reset |
 | S6 — Notifications | Email + SMS on confirmation and cancellation; retry | Notifications delivered, failures non-blocking | O9 met |
 | S7 — Client + Admin | Full UI, admin dashboard, containers | `docker-compose` stack running | Full journey works end to end |
 | S8 — Test + UAT | Usability round, coverage push, static analysis | UAT results + modifications | O5 met |
@@ -350,21 +349,20 @@ Step 16 being outside the transaction is deliberate: a customer who has paid mus
 | **R13** | **Customer pays then closes the tab before confirm** | **Med** | **High** | Reconciliation job every 2 min is a *core* requirement under ADR-014, not a backstop; tested explicitly (D4.3b) | Dev |
 | **R14** | **Payment taken but seat not allocated** | Low | **High** | Idempotent confirm via unique `paymentIntentId` index; reconciliation job; automatic refund + admin alert on allocation failure (ADR-014) | Dev |
 | **R23** | **Confirm endpoint accepts client-supplied payment facts** | Low | **High** | Endpoint accepts `{holdId}` only; all payment facts retrieved server-side; explicit test that a forged confirm is rejected (ADR-014) | Dev |
-| **R15** | **Orphaned seat holds strand inventory** | Med | Med | TTL on every hold; sweeper runs every 60s; MongoDB TTL index as backstop (ADR-012) | Dev |
+| **R15** | **Orphaned seat holds strand inventory** | Med | Med | Every read treats `holdExpiresAt < now` as released, independent of sweeper timing; sweeper runs every 60s. **No MongoDB TTL index exists on `holds`** — a TTL index would delete the very record the reconciliation job (FR-39) needs to read (ADR-012) | Dev |
 | **R16** | **SMTP or Notify.lk outage blocks booking** | Med | High | Notifications dispatched asynchronously outside the booking transaction; failures logged and retried, never rolled back (O9) | Dev |
 | **R17** | **Notify.lk credit exhausted or number undeliverable** | Med | Low | SMS is best-effort; email is the authoritative channel; failures surfaced in admin log not to the customer as an error | Dev |
 | **R18** | **Verification/reset token leaked or replayed** | Low | High | Tokens random, hashed at rest, single-use, short TTL, invalidated on use and on password change (ADR-011) | Dev |
 | **R19** | **User enumeration via auth endpoints** | Med | Med | Identical response and timing for existing and non-existing emails on login, registration, and password reset | Dev |
-| **R20** | **Redis judged a prohibited second database by the assessor** | Med | **High** | Confirm in writing with the module leader before Sprint 5; ADR-013 Option D is a costed fallback requiring no scope change | Dev |
-| **R21** | **Stale cached catalogue data shown after an admin edit** | Med | Med | Explicit invalidation on every write, not TTL alone; short TTLs; seat state never cached | Dev |
-| **R22** | **Redis outage blocks requests** | Low | High | Every Redis path has a MongoDB or in-process fallback; no booking may fail because Redis is down (NFR-15a) | Dev |
+| **R20** | **A revoked-but-expired TTL row is trusted as still valid because the reaper has not yet swept it** | Low | **High** | Read-time correctness rule (ADR-013 Option D): a `revokedtokens`/`ratelimits` row past its `expiresAt` is treated as absent at query time, never trusted merely because it has not yet been physically deleted | Dev |
+| **R21** | **`ratelimits` writes on every auth attempt add load MongoDB was not sized for** | Low | Med | Window-bucketed counters (not one document per attempt); indexed on the rate-limit key; monitored against NFR-2's latency target | Dev |
 
 ## A11. Monitoring and observability
 
 - **Structured logging:** JSON with request id, user id, route, status, duration. Payment and notification events logged with correlation ids.
 - **Health endpoint:** `GET /api/health` reports API status, MongoDB connectivity, and last successful outbound call per integration.
 - **Error tracking:** all unhandled errors funnel through one Express error middleware; logged with stack, safe message returned.
-- **Key signals:** 5xx rate, 409 conflict rate, WebSocket connection count, p95 booking latency, **held-seat count and hold expiry rate**, **confirm failure count and reconciliation-completed booking count** (a rising reconciliation share signals clients not returning), **email/SMS delivery failure rate**, **cache hit ratio and Redis connection state**.
+- **Key signals:** 5xx rate, 409 conflict rate, WebSocket connection count, p95 booking latency, **held-seat count and hold expiry rate**, **confirm failure count and reconciliation-completed booking count** (a rising reconciliation share signals clients not returning), **email/SMS delivery failure rate**, **`ratelimits` and `revokedtokens` collection sizes** (a sanity check that TTL expiry is actually reclaiming space).
 - **Atlas dashboard** supplies connection counts, slow-query logs, and storage usage; **Stripe dashboard** provides an independent record of every payment for reconciliation.
 
 ## A12. Ethics, security, and academic integrity
@@ -391,7 +389,7 @@ Fourteen decisions material enough to warrant a record. Each states the forces a
 
 ## ADR-001: Modular monolith over microservices
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 The brief permits multiple optional backend servers. The system has three broad concerns — accounts, catalogue (films/cinemas/showtimes), and booking/payment/realtime. A solo developer has 80+ hours and limited staff support. The report must describe whether the architecture is monolithic or micro-service based, so the choice must be deliberate and defensible either way.
@@ -443,7 +441,7 @@ The decisive factor is that the estimated peak load (§A7) is roughly 20 req/s �
 
 ## ADR-002: MongoDB with an embedded seat array
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 The brief permits MongoDB or PouchDB only. Within MongoDB, seat state can be modelled either as an array embedded in the Showtime document or as a separate `seats` collection. This choice determines how seat availability is read and how booking concurrency is controlled.
@@ -491,7 +489,7 @@ Option A trades unbounded auditorium size — which the assumptions in §A4.3 ma
 
 ## ADR-003: Socket.IO over raw WebSockets
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 The brief mandates WebSockets to give the appearance of communication between multiple clients. The system needs per-showtime broadcast (only clients viewing showtime X should receive X's seat updates), and must behave sanely when a client's connection drops.
@@ -523,7 +521,7 @@ The only genuine advantage of raw `ws` is payload size, which is immaterial at 2
 
 ### Consequences
 - **Easier:** per-showtime targeting, reconnection resilience, client integration.
-- **Harder:** scaling beyond one server instance later requires the Redis adapter for cross-instance broadcast (explicitly out of scope, §A4.2). **Update (ADR-013):** Redis is now present, so this path is open should it ever be needed — though multi-instance deployment remains out of scope.
+- **Harder:** scaling beyond one server instance later requires a pub/sub adapter for cross-instance broadcast, which is explicitly out of scope (§A4.2). **Update (ADR-013):** ADR-013 Option D deliberately does not introduce Redis, so this scaling path stays closed rather than opening — consistent with multi-instance deployment remaining out of scope.
 - **Revisit when:** a second API instance is introduced.
 
 ### Action items
@@ -534,7 +532,7 @@ The only genuine advantage of raw `ws` is payload size, which is immaterial at 2
 
 ## ADR-004: Atomic conditional update for seat concurrency
 
-**Status:** ⚠️ **SUPERSEDED by ADR-012** · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** ⚠️ **SUPERSEDED by ADR-012** · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 > **Superseded because:** this decision assumed booking is a single instantaneous request. Introducing Stripe (ADR-009) puts seconds of user-driven latency between seat selection and payment confirmation, during which the seat must not be sold to anyone else. The atomic-update-at-submit model cannot express that gap. The atomicity *technique* recorded here is retained and reused by ADR-012 — what changes is *when* it fires. This record is kept rather than deleted so the reasoning chain remains visible.
 
@@ -579,7 +577,7 @@ Option B is not a real option — it is the bug this ADR exists to prevent, reco
 
 ## ADR-005: JWT over server-side sessions
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 The brief requires security considerations including registration and login. The API is consumed by a separate React origin and must authenticate both REST requests and the WebSocket handshake.
@@ -606,20 +604,20 @@ Revocation is the one real advantage of sessions, and it matters most for long-l
 - **Easier:** stateless API, uniform auth for HTTP and WebSocket, simple horizontal scaling later.
 - **Harder:** immediate logout-everywhere; token storage must avoid XSS exposure.
 - **Revisit when:** admin privilege escalation or forced logout becomes a requirement — then add a short-lived access token plus a revocable refresh token.
-- **Update (ADR-013):** the revocation weakness acknowledged above is now addressed. A Redis `jti` denylist makes password reset genuinely invalidate outstanding sessions (FR-15), which this decision alone could not deliver.
+- **Update (ADR-013):** the revocation weakness acknowledged above is now addressed. A MongoDB `revokedtokens` TTL collection (ADR-013 Option D) makes password reset genuinely invalidate outstanding sessions (FR-15), which this decision alone could not deliver.
 
 ### Action items
 1. [ ] Set a short access-token expiry.
 2. [ ] Verify the token in the Socket.IO handshake, not only on REST routes.
-3. [ ] Never place the token in a URL query string (NFR-3).
+3. [ ] Never place the token in a URL query string (NFR-11).
 
 ---
 
 ## ADR-006: No caching layer
 
-**Status:** ⚠️ **SUPERSEDED by ADR-013** · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted — **Amended by ADR-013 (Option D)** · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
-> **Superseded because:** the system has since acquired shared ephemeral state — rate-limit counters, token revocation, socket pub/sub — that neither process memory nor MongoDB handles well, and a password-reset flow (FR-15) whose session-invalidation promise stateless JWT cannot keep. **The core argument below is not overturned:** seat state must never be cached, and ADR-013 preserves that prohibition absolutely. What changed is that Redis is now justified for reasons unrelated to read latency.
+> **Amended, not superseded, because:** an earlier revision of ADR-013 (v3.1) superseded this record by introducing a Redis cache. ADR-013 has since been revised to **Option D**, which drops caching of any kind — catalogue caching included — and instead adds two MongoDB TTL collections for shared ephemeral state (token revocation, rate limiting), a concern this record never addressed. **The core argument below is fully intact and, if anything, strengthened:** no caching layer exists anywhere in the system, seat state is never cached, and neither is the catalogue. ADR-013 Option D amends this record only by extending MongoDB's role to non-cache ephemeral state; it does not reopen the caching question.
 
 ### Context
 Event listings are read-heavy and would be an obvious caching candidate. A Redis cache is a common instinct at this point in a design.
@@ -654,7 +652,7 @@ Caching here would be optimisation without a measured problem, and the failure m
 
 ## ADR-007: MongoDB Atlas (managed) over a self-hosted MongoDB container
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 ADR-002 settled MongoDB as the datastore and the embedded-seat-array schema. A separate question remains: where does MongoDB actually run? The options are a self-hosted `mongo` container in `docker-compose`, or a managed MongoDB Atlas cluster reached over the network via a connection string. The brief requires the system to be distributed and capable of running on multiple computers, so the choice must not undermine that.
@@ -714,7 +712,7 @@ Against that, Atlas removes an entire class of operational work (volumes, persis
 
 ## ADR-008: TypeScript on the client, JavaScript on the server
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 The brief permits either classic JavaScript or TypeScript, and does not require both sides to match. The client carries substantial stateful complexity — seat selection state, WebSocket event payloads, API response shapes, role-conditional rendering — where type errors are easy to introduce and awkward to catch at runtime. The server is comparatively thin: routes, controllers, services, and Mongoose models, where Mongoose already enforces schema at the data boundary and where adding a build step costs setup time from an 80-hour budget.
@@ -759,8 +757,8 @@ The honest cost of this split is the **API boundary seam**: the client declares 
 ### Action items
 1. [ ] Enable `strict` in the client `tsconfig.json`; ban `any` on API response types via lint rule.
 2. [ ] Define all API response and socket payload types in a single client-side `types/api.ts` so drift has one place to be fixed.
-3. [ ] Add `tsc --noEmit` as a CI step (NFR-9a).
-4. [ ] Assert response shape in the integration test for every endpoint in §C7.1 (NFR-9b).
+3. [ ] Add `tsc --noEmit` as a CI step (NFR-17).
+4. [ ] Assert response shape in the integration test for every endpoint in §C7.1 (NFR-19).
 5. [ ] Add JSDoc type annotations to server service-layer functions to preserve editor support and ease any future migration.
 6. [ ] Configure ESLint separately for each side (`@typescript-eslint` on the client, base config on the server).
 
@@ -768,7 +766,7 @@ The honest cost of this split is the **API boundary seam**: the client declares 
 
 ## ADR-009: Stripe with PaymentIntents and webhook confirmation
 
-**Status:** ⚠️ **SUPERSEDED by ADR-014** · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** ⚠️ **SUPERSEDED by ADR-014** · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 > **Superseded because:** webhooks require a publicly reachable endpoint and the Stripe CLI during local development — an extra process that can fail during a recorded demonstration. ADR-014 replaces push confirmation with **server-side retrieval**, which keeps the security property intact. **The central argument below is not overturned:** the browser must never be the authority on payment success. ADR-014 still obtains status from Stripe over a server-to-server channel using the secret key — it pulls the answer instead of being pushed it.
 
@@ -816,17 +814,17 @@ The residual risk is the gap between "Stripe charged the card" and "our database
 1. [ ] Test-mode keys only; `sk_test_…` never leaves the server, `pk_test_…` only in the client.
 2. [ ] Compute the amount **server-side** from stored seat prices; never trust an amount from the client.
 3. [ ] Pass `holdId` as the Stripe idempotency key when creating the PaymentIntent.
-4. [ ] Verify `stripe-signature` on every webhook; reject unverified requests with 400 and log.
-5. [ ] Store processed Stripe event ids; make reprocessing a no-op.
-6. [ ] Exempt the webhook route from JWT auth and from the JSON body parser (signature verification needs the raw body — a classic and time-consuming bug).
-7. [ ] Build the reconciliation job in the same sprint as the webhook, not later.
-8. [ ] Use Stripe CLI (`stripe listen --forward-to`) from day one of S5.
+4. [ ] **Not implemented — superseded by ADR-014.** Verify `stripe-signature` on every webhook; reject unverified requests with 400 and log.
+5. [ ] **Not implemented — superseded by ADR-014.** Store processed Stripe event ids; make reprocessing a no-op.
+6. [ ] **Not implemented — superseded by ADR-014.** Exempt the webhook route from JWT auth and from the JSON body parser (signature verification needs the raw body — a classic and time-consuming bug).
+7. [ ] **Not implemented — superseded by ADR-014.** Build the reconciliation job in the same sprint as the webhook, not later — reconciliation *is* implemented, but as part of ADR-014's confirm-driven flow, not a webhook handler.
+8. [ ] **Not implemented — superseded by ADR-014.** Use Stripe CLI (`stripe listen --forward-to`) from day one of S5 — no longer needed since there is no webhook to forward.
 
 ---
 
 ## ADR-010: Nodemailer for email, Notify.lk for SMS, dispatched asynchronously
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 The system must send transactional messages: email verification, password reset, booking confirmation, and showtime cancellation. Sri Lankan customers benefit from SMS confirmation, since a booking reference on the phone survives a lost inbox. Both channels depend on external services that will sometimes be slow or down.
@@ -874,7 +872,7 @@ SMS is treated as best-effort rather than authoritative because delivery depends
 
 ## ADR-011: Hashed, single-use, TTL-bound tokens for verification and password reset
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole)
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole)
 
 ### Context
 Registration now requires email verification, and users must be able to reset a forgotten password. Both flows work by emailing a link containing a token. These tokens are, for the moment they are valid, equivalent to the account's password — a reset token grants the ability to set a new one. Password reset is also a classic source of user-enumeration leaks.
@@ -930,13 +928,13 @@ The second concern is **enumeration** (R19). A password-reset endpoint that says
 
 ## ADR-012: TTL seat hold spanning the payment window (supersedes ADR-004)
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole) · **Supersedes:** ADR-004
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole) · **Supersedes:** ADR-004
 
 ### Context
 ADR-004 chose an atomic conditional update at the moment of booking, and explicitly rejected a pessimistic hold as unnecessary complexity. That reasoning was sound *for a system with no payment step*. Stripe (ADR-009) changes the premise: the customer now spends seconds — potentially minutes — entering card details between selecting a seat and the payment confirming. Under ADR-004's model the seat stays available throughout that window, so two customers can pay for the same seat and one must be refunded. That is a materially worse outcome than being told up front that a seat is gone.
 
 ### Decision
-Introduce an explicit **hold** state. Seats move `available → held → booked`, or `held → available` on expiry or abandonment. A hold is created atomically before the PaymentIntent, carries a **10-minute TTL**, and is released by a sweeper if payment does not complete.
+Introduce an explicit **hold** state. Seats move `available → held → booked`, or `held → available` on expiry or abandonment. A hold is created atomically before the PaymentIntent, carries a **10-minute TTL**, and is released by a sweeper if payment does not complete. The hold itself is recorded as its own document in a separate `holds` collection (§C6.2), referenced from the Showtime's embedded seats by `holdRef` — it is not embedded in Booking, since a hold and a booking are different lifecycle stages with different audit requirements (D6).
 
 ### Options considered
 
@@ -958,7 +956,9 @@ Introduce an explicit **hold** state. Seats move `available → held → booked`
 ### Trade-off analysis
 The complexity ADR-004 declined is now justified — not because the earlier reasoning was wrong, but because the premise changed. This is worth stating plainly in the report: an architectural decision is correct relative to its constraints, and revisiting it when constraints change is the process working, not a mistake being corrected.
 
-The chief risk is stranded inventory (R15), mitigated in depth: an application-level sweeper every 60 seconds; a MongoDB TTL-style backstop so holds expire even if the sweeper process dies; and every read of seat state treating a hold with `holdExpiresAt < now` as available regardless of stored status, so a lagging sweeper can never cause a seat to appear taken when it is not. That last property matters most — correctness does not depend on a background job running on time.
+The chief risk is stranded inventory (R15), mitigated in depth: an application-level sweeper every 60 seconds, and — decisively — every read of seat state treating a hold with `holdExpiresAt < now` as available regardless of stored status, so a lagging or dead sweeper can never cause a seat to appear taken when it is not. That last property matters most — correctness does not depend on a background job running on time.
+
+**No TTL index on the `holds` collection.** Unlike `revokedtokens` and `ratelimits` (ADR-013 Option D), the `holds` collection deliberately carries **no** MongoDB TTL index. Deleting an expired hold would destroy the very record the reconciliation job (FR-39) needs to read — a hold that expired after a successful payment is exactly the case reconciliation must find and complete. A hold is therefore never removed automatically; it is only ever transitioned between `active`, `released`, and `consumed` (§C6.2).
 
 Ten minutes is chosen as long enough to enter card details unhurried, short enough that an abandoned checkout does not block a seat through a busy screening slot. The client displays a visible countdown so the constraint is never a surprise.
 
@@ -968,7 +968,7 @@ Ten minutes is chosen as long enough to enter card details unhurried, short enou
 - **Revisit when:** contention rises enough that 10 minutes is too generous, or a queue system becomes warranted for high-demand releases.
 
 ### Action items
-1. [ ] Add `held` to the seat status enum, with `holdRef` and `holdExpiresAt`.
+1. [ ] Add `held` to the seat status enum, with `holdRef` and `holdExpiresAt`; create the corresponding document in the separate `holds` collection (§C6.2).
 2. [ ] Create holds via the same atomic conditional update technique retained from ADR-004.
 3. [ ] Sweeper every 60s releasing expired holds and broadcasting `seats:updated`.
 4. [ ] **Every read treats an expired hold as available**, independent of the sweeper.
@@ -976,109 +976,96 @@ Ten minutes is chosen as long enough to enter card details unhurried, short enou
 6. [ ] Client shows a countdown; on expiry, clear selection and re-fetch.
 7. [ ] Concurrency test: 50 simultaneous holds on one seat → exactly one success.
 8. [ ] Crash test: kill the API mid-hold, restart, confirm the seat frees at expiry.
+9. [ ] **Do not add a TTL index to `holds`.** Add a code comment at the schema definition stating why (reconciliation, FR-39), so a future change does not quietly reintroduce one.
 
 ---
 
-## ADR-013: Redis for shared ephemeral state and catalogue caching (supersedes ADR-006)
+## ADR-013: MongoDB TTL collections for shared ephemeral state — Option D (amends ADR-006)
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole) · **Supersedes:** ADR-006
+**Status:** Accepted — **Option D** · **Date:** 2026-08-23 · **Deciders:** Developer (sole) · **Amends:** ADR-006
+
+> **History note:** an earlier revision of this record (v3.1) chose Redis (then labelled "Option A") for this same problem, superseding ADR-006's no-cache position. That choice was never implemented past the planning stage and is **replaced** by this revision. Redis's compliance risk (R20, retired) has proved decisive against it; Option D below is now the only decision this ADR records. It **amends** ADR-006 rather than superseding it, because it reaffirms — rather than reopens — ADR-006's core position that no caching layer exists anywhere in the system.
 
 ### Context
 
-ADR-006 declined a cache, and its central argument was sound: caching **seat state** would serve stale availability and undermine the correctness guarantee the whole system rests on. That argument still holds and is preserved below.
+ADR-006 declined a cache, and its central argument was sound: caching **seat state** would serve stale availability and undermine the correctness guarantee the whole system rests on. That argument still holds and is preserved below, strengthened rather than weakened by this ADR.
 
-What has changed is that the system has since acquired four pieces of state that are **ephemeral, shared, and awkward to hold in MongoDB or in process memory**:
+Separately, the system has acquired **three** pieces of state that are ephemeral, shared, and awkward to hold in process memory alone:
 
 1. **Rate-limit counters** (FR-10, FR-18, NFR-6). Currently in-process, which means they reset on every deploy and would not be shared if a second instance were ever added. An attacker can defeat an in-memory limiter by waiting for a restart.
 2. **Token revocation** (FR-15). The requirement states that resetting a password invalidates all existing sessions. **Stateless JWT cannot do this** — ADR-005 explicitly accepted "no revocation before expiry" as a known weakness. As written, v3.0 promised behaviour the architecture could not deliver. This ADR closes that gap.
-3. **Socket.IO cross-instance broadcast** (ADR-003 consequence). Recorded as the migration path if a second API instance were ever introduced.
-4. **Short-lived operational keys** — reconciliation locks and confirm-in-flight markers, preventing the reconciliation job and a returning client from racing on the same hold.
+3. **Short-lived operational safety** — preventing the reconciliation job and a returning client from double-processing the same hold. This does not need a separate store: it is handled by the same atomic, conditional writes already used for seat holds (ADR-012) and idempotent confirmation (the unique index on `bookings.paymentIntentId`, ADR-014), so no new ephemeral mechanism is introduced for it.
 
-Separately, the catalogue (films, cinemas, showtime metadata) is genuinely read-heavy and changes rarely — a legitimate cache candidate that did not exist in the same form when ADR-006 was written.
+(Socket.IO cross-instance broadcast — the fourth candidate considered in earlier drafts — is **not** in this list: horizontal scaling of the WebSocket layer is explicitly out of scope, §A4.2, so there is no cross-instance broadcast problem to solve.)
+
+Catalogue read latency, considered as a secondary benefit in earlier drafts, is **not** a driver here: at the estimated ~25 req/s (§A7), NFR-2's read-latency target is already met by the indexes in §C6.3 without any cache.
 
 ### Decision
 
-Introduce **Redis**, scoped deliberately:
+Solve both problems in **MongoDB**, with two dedicated TTL collections — no second datastore of any kind:
 
-| Use | Data | TTL | Authority |
+| Collection | Holds | TTL index on | Closes |
 |---|---|---|---|
-| Rate limiting | Attempt counters per email and IP | Window length | Redis |
-| Token denylist | Revoked JWT ids (`jti`) | Remaining token lifetime | Redis |
-| Socket adapter | Pub/sub for cross-instance broadcast | n/a | Redis |
-| Catalogue cache | Film list, film detail, cinema list | 5–10 min | **MongoDB** |
-| Showtime metadata cache | Time, screen, price — **never seat state** | 2 min | **MongoDB** |
+| `revokedtokens` | Revoked JWT ids (`jti`), keyed by user and issued-at | `expiresAt` = remaining token lifetime | FR-15 (session revocation) |
+| `ratelimits` | Attempt counters per email/IP and per time window | `expiresAt` = window end | NFR-6 (rate limits survive a restart) |
 
-**Explicitly NOT cached — and this is the load-bearing constraint:**
+**Read-time correctness rule (load-bearing):** a TTL index is a background *reaper* that runs on its own schedule (MongoDB documents it as typically within 60 seconds of expiry, not instantly). Every read of `revokedtokens` or `ratelimits` therefore treats a row whose `expiresAt` has passed as **already absent**, regardless of whether the reaper has physically deleted it yet. Correctness never depends on reaper timing — exactly the same discipline ADR-012 applies to seat holds.
 
-- **Seat availability, holds, and booked status.** Always read live from MongoDB. ADR-006's reasoning applies here unchanged: a stale seat map is not a performance trade-off, it is a correctness failure. This prohibition is absolute.
-- Booking records, payment status, user accounts, auth tokens.
+**Explicitly not reintroduced:**
 
-**MongoDB remains the sole system of record.** Everything in Redis is either derived from MongoDB and reconstructible by discarding it, or ephemeral state whose loss degrades the system gracefully rather than corrupting it.
+- **No catalogue cache.** Films, cinemas, and showtime metadata are read directly from MongoDB via the §C6.3 indexes. This is a deliberate loss of a secondary benefit considered in earlier drafts, not an oversight — see Trade-off analysis.
+- **Seat availability, holds, and booked status** are still never cached anywhere, under any option. ADR-006's prohibition is unchanged and absolute.
+- Booking records, payment status, user accounts, and auth tokens remain uncached, as before.
+
+**MongoDB remains the sole system of record and the sole datastore of any kind.** Everything in `revokedtokens` and `ratelimits` is ephemeral, derived, and reconstructible by discarding it; nothing in either collection is authoritative over anything durable.
 
 ### Options considered
 
-**Option A — Redis, scoped to ephemeral state plus catalogue cache (chosen)**
+| Dimension | Option A — Redis (rate limit + revocation + catalogue cache) | Option B — status quo (in-process only) | Option C — Redis for catalogue cache only | **Option D — MongoDB TTL collections (chosen)** |
+|---|---|---|---|---|
+| Solves FR-15 revocation | Yes | No | No | **Yes** |
+| Solves NFR-6 restart-surviving rate limits | Yes | No | No | **Yes** |
+| Catalogue read latency | Improved | Unchanged | Improved | Unchanged (already meets NFR-2 via §C6.3) |
+| New datastore introduced | Yes — Redis | No | Yes — Redis | **No** |
+| Coursework compliance risk | **High — "other types of database are not permitted" (R20)** | None | **High**, for the least value of any option | **None** |
+| Write cost | Low (in-memory) | N/A | Low (in-memory) | Moderate — every auth attempt is a small Mongo write |
+| Complexity | A fourth service to run, secure, monitor | None | A fourth service, for one problem | Two schemas and two TTL indexes; no new service |
 
-| Dimension | Assessment |
-|---|---|
-| Correctness risk | Low — seat state explicitly excluded |
-| Capability gained | Real token revocation, durable rate limiting, socket scaling path |
-| Complexity | Medium — a fourth service, plus invalidation logic |
-| Coursework risk | **Medium — "other types of database are not permitted"** |
-
-**Pros:** delivers FR-15's session-invalidation promise, which is otherwise undeliverable; rate limiting survives restarts and would work across instances; unlocks ADR-003's deferred scaling path; catalogue reads get faster at genuinely no correctness cost.
-**Cons:** a fourth service to run, secure, and monitor; cache invalidation is a new class of bug; another connection string to protect; **and a real risk that an assessor reads Redis as a prohibited second database**.
-
-**Option B — No cache, retain ADR-006 as written**
-
-**Pros:** simplest; unambiguously compliant with the brief's database restriction; zero staleness risk.
-**Cons:** FR-15 remains a promise the system cannot keep, which is worse than not making it; rate limiting stays defeatable by a restart; no scaling path for sockets.
-
-**Option C — Redis for catalogue caching only**
-
-**Pros:** the obvious "add a cache" answer; simple invalidation.
-**Cons:** takes on the compliance risk and the extra service **without** solving revocation or rate limiting — the two problems that actually justify the cost. If Redis is worth adding at all, this is the least valuable way to use it.
-
-**Option D — Solve revocation and rate limiting in MongoDB instead**
-
-**Pros:** no new service; no compliance question at all; a `revokedTokens` collection with a TTL index is genuinely workable.
-**Cons:** rate limiting via database writes on every auth attempt is a poor fit — high write volume for data that is worthless seconds later; no pub/sub, so ADR-003's scaling path stays closed. But it is a legitimate fallback and is the recommended retreat if the compliance question resolves against Redis.
+**Pros of Option D:** delivers FR-15 and NFR-6, the two capabilities that actually justify solving this problem at all; introduces no new service, connection string, or secret; the compliance question raised by every Redis-based option simply does not arise, since MongoDB was already the sole permitted datastore.
+**Cons of Option D:** a small write on every auth attempt is a less natural fit for MongoDB than for an in-memory store; catalogue caching, and the Socket.IO cross-instance scaling path Redis would have unlocked, are both given up — the former was only ever a secondary benefit, and the latter was already out of scope.
 
 ### Trade-off analysis
 
-The instinct to "add a cache" is usually about read latency, and at 25 req/s (§A7) read latency is not a problem this system has. **Redis earns its place here for a different reason: it provides shared ephemeral state that neither process memory nor a document store handles well.** Catalogue caching is a genuine but secondary benefit.
+The decisive factor is the **compliance argument**, not a performance one. The brief states plainly that "other types of database are not permitted," and every Redis-based option (A and C) carries a real, previously-recorded risk (R20) that an assessor reads Redis as exactly that — a second database — regardless of how carefully it is scoped to "infrastructure, not data." Option D removes the argument entirely rather than winning it: MongoDB was always the sole permitted datastore, and Option D keeps it that way while still closing FR-15 and NFR-6.
 
-The decisive factor is FR-15. A requirement stating that password reset invalidates existing sessions is not optional polish — it is what a user reasonably expects after a compromise, and shipping an architecture that silently cannot honour it is worse than not claiming it. ADR-005 accepted non-revocability when the system had no reset flow; adding one changed that premise, exactly as adding payment changed ADR-004's premise. Redis with a short-lived `jti` denylist makes the promise real at low cost.
+Catalogue caching is consciously **dropped as a lost secondary benefit**, not preserved by another means. It was never the reason Redis was considered in earlier drafts — FR-15 and NFR-6 were — and NFR-2's read-latency target is already met by the §C6.3 indexes without it, so nothing currently in scope is actually lost.
 
-Against that sits the compliance risk, which is the honest reason this ADR is not a clear win. The argument that Redis is infrastructure rather than a database — nothing persisted, nothing authoritative, everything reconstructible — is defensible, but it is an argument, not a certainty. **It must be confirmed with the module leader before Sprint 5.** If the answer is no, Option D is the retreat: revocation and rate limiting move to MongoDB collections with TTL indexes, catalogue caching is dropped, and only the socket scaling path is lost — which is already out of scope.
-
-The remaining risk is cache invalidation. It is contained by scope: only slow-changing catalogue data is cached, TTLs are short, and every admin write explicitly invalidates the affected keys. Seat state, the one thing where staleness would be genuinely harmful, is never cached at all.
+The residual cost is write volume on `ratelimits`: a small MongoDB write per auth attempt, versus an in-memory increment. At the estimated login/reset volume (§A7) this is not a measured problem, and it buys restart-surviving rate limits, which an in-process counter cannot provide at any cost.
 
 ### Consequences
 
-- **Easier:** FR-15 becomes deliverable; rate limiting survives restarts; catalogue reads get faster; ADR-003's scaling path opens.
-- **Harder:** a fourth service to run, secure, and monitor; invalidation bugs become possible; another secret; Redis unavailability must degrade gracefully rather than fail requests; **a compliance question that needs answering in writing**.
-- **Revisit when:** the module leader rules against it (fall back to Option D), or cached data grows beyond slow-changing catalogue entries.
+- **Easier:** FR-15 and NFR-6 become deliverable; no fourth service to run, secure, or monitor; no new secret; the compliance question is closed rather than merely mitigated; one datastore to back up, monitor, and reason about.
+- **Harder:** rate-limit writes add a small amount of MongoDB write load absent from an in-memory counter; catalogue caching and the Socket.IO scaling path are given up (both judged acceptable — see Trade-off analysis); every read path must apply the read-time correctness rule rather than trusting collection contents at face value.
+- **Revisit when:** catalogue read latency is *measured* (not assumed) to exceed NFR-2's target, or rate-limit write volume is measured to strain the shared-tier Atlas cluster — at which point a purpose-built in-memory store becomes a live discussion again, subject to the same compliance question this ADR closes.
 
 ### Action items
 
-1. [ ] **Confirm with the module leader, in writing, that Redis-as-infrastructure is acceptable given "other types of database are not permitted."** Do this before Sprint 5. Record the answer in this ADR.
-2. [ ] Add `REDIS_URL` to the secrets inventory (§A6.4), `.env.example`, and CI secrets.
-3. [ ] **Never cache seat state.** Add a code comment at the seat-read path stating why, so a future change does not quietly break it.
-4. [ ] Add `jti` to issued JWTs; check the denylist in auth middleware.
-5. [ ] On password reset and on logout-all, add the user's outstanding `jti` values to the denylist with TTL equal to remaining token life.
-6. [ ] Move rate-limit counters to Redis (`rate-limiter-flexible` or equivalent).
-7. [ ] Cache keys namespaced `cache:films:list`, `cache:films:<id>`, `cache:cinemas:list`, `cache:showtimes:<id>:meta`.
-8. [ ] Every admin write on a film, cinema, or showtime invalidates the matching keys explicitly — do not rely on TTL alone.
-9. [ ] **Degrade gracefully:** if Redis is unreachable, cache reads fall through to MongoDB, rate limiting falls back to in-process, and the denylist fails **closed** for revocation checks only if the token is older than the last known reset. Never fail a booking because Redis is down.
-10. [ ] Use `ioredis-mock` or `fakeredis` in tests; no test connects to a real Redis.
+1. [ ] Create the `revokedtokens` collection: `{jti, userRef, expiresAt}`, TTL index on `expiresAt`.
+2. [ ] Create the `ratelimits` collection: `{key, windowStart, count, expiresAt}`, TTL index on `expiresAt`.
+3. [ ] **Read-time correctness:** every lookup against `revokedtokens` or `ratelimits` treats a row with `expiresAt < now` as absent, never trusting that the TTL reaper has already removed it.
+4. [ ] Add `jti` to issued JWTs; check `revokedtokens` in auth middleware.
+5. [ ] On password reset and on logout-all, insert the user's outstanding `jti` values into `revokedtokens` with `expiresAt` equal to the token's own remaining lifetime.
+6. [ ] Implement rate limiting as windowed counters in `ratelimits`, keyed by email and by IP, incremented atomically (`$inc` with upsert).
+7. [ ] Do **not** reintroduce a catalogue cache; if read latency ever motivates one, revisit this ADR rather than adding it silently.
+8. [ ] Remove `REDIS_URL`, `ioredis`, and `ioredis-mock` from the secrets inventory (§A6.4), `.env.example`, dependencies, and test setup.
+9. [ ] Unit-test the read-time correctness rule directly: a row with a past `expiresAt` still present in the collection (reaper not yet run) must still be treated as absent.
 
 ---
 
 
 ## ADR-014: Server-side PaymentIntent retrieval instead of webhooks (supersedes ADR-009)
 
-**Status:** Accepted · **Date:** [date] · **Deciders:** Developer (sole) · **Supersedes:** ADR-009
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Developer (sole) · **Supersedes:** ADR-009
 
 ### Context
 
@@ -1155,7 +1142,7 @@ This trade is acceptable for coursework, where demonstrability has real value an
 3. [ ] Verify all five conditions above before allocating; abort and log on any mismatch.
 4. [ ] Unique index on `bookings.paymentIntentId` for idempotency; on duplicate-key error, return the existing booking with 200.
 5. [ ] Reconciliation job every 2 minutes: for each hold with a succeeded PaymentIntent and no booking, complete the booking and notify.
-6. [ ] Remove `STRIPE_WEBHOOK_SECRET` from the secrets inventory; drop the `ProcessedWebhookEvent` collection.
+6. [ ] Remove `STRIPE_WEBHOOK_SECRET` from the secrets inventory. No webhook-event model is introduced anywhere in this system — there is no inbound webhook route to deduplicate events for (D7); idempotency is achieved entirely by the unique index on `bookings.paymentIntentId` (action item 4 below).
 7. [ ] Test that a forged confirm request for another user's hold is rejected (403).
 8. [ ] Test that a confirm request for a PaymentIntent whose amount differs from the server-computed total is rejected.
 9. [ ] Test the abandoned-tab path: pay, never call confirm, assert reconciliation creates the booking.
@@ -1179,29 +1166,30 @@ As defined in §A4. Encore Cinemas is a distributed cinema booking system: a Rea
 
 | Term | Meaning |
 |---|---|
-| Film | A movie in the catalogue |
+| Film | A motion picture in the catalogue (formerly referred to as "Movie" in early drafts; renamed for consistency with cinema-industry terminology — D1) |
 | Cinema | A physical venue containing one or more screens |
 | Screen | An auditorium within a cinema, with a fixed seat layout |
 | Showtime | A specific film screening on a specific screen at a specific time |
 | Seat state | One of `available`, `held`, `booked` |
-| Hold | A time-limited reservation of seats during checkout (ADR-012) |
+| Seat tier | The fixed section a seat belongs to — `STANDARD` (×1.00), `PREMIUM` (×1.35), or `RECLINER` (×1.80) — multiplying a showtime's `basePrice` to give that seat's actual price, frozen at showtime creation (D8). Distinct from dynamic/surge pricing, which is out of scope (§A4.2) |
+| Hold | A time-limited reservation of seats during checkout, recorded as its own document (not embedded in Booking — D6) with no TTL index (ADR-012) |
 | PaymentIntent | Stripe's server-created object representing an intended payment |
 | Idempotent | Safe to process more than once with the same result |
 | TOCTOU | Time-of-check-to-time-of-use race condition |
 
 ### C1.4 References
-IEEE Std 830; PUSL3120 assessment brief; Encore Design System v1.0; Frontend Build Specification v1.0; ADR-001 to ADR-012.
+IEEE Std 830; PUSL3120 assessment brief; Encore Design System v1.0; Frontend Build Specification v1.0; ADR-001 to ADR-014.
 
 ## C2. Overall description
 
 ### C2.1 Product perspective
-A new, self-contained system: four deployable tiers (client container, API container, Redis container, managed Atlas cluster), one realtime channel, and three outbound integrations. **No inbound webhook endpoint is required** (ADR-014).
+A new, self-contained system: three deployable tiers (client container, API container, managed Atlas cluster), one realtime channel, and three outbound integrations. **No inbound webhook endpoint is required** (ADR-014); the legacy webhook route has been removed (D7).
 
 ### C2.2 Product functions
 Account management with email verification and password reset; film and showtime browsing; interactive seat selection with live availability; time-limited seat holds; card payment via Stripe; booking confirmation by email and SMS; booking history and cancellation; admin management of films, cinemas, screens, showtimes, and bookings.
 
 ### C2.3 Operating environment
-Modern evergreen browsers (client); Node.js LTS runtime (server), containerised via `docker-compose`; MongoDB Atlas managed replica set over TLS. The API requires outbound access to Atlas, Redis, Stripe, SMTP, and Notify.lk. **No publicly reachable inbound endpoint is required**, since all Stripe traffic is outbound (ADR-014).
+Modern evergreen browsers (client); Node.js LTS runtime (server), containerised via `docker-compose`; MongoDB Atlas managed replica set over TLS. The API requires outbound access to Atlas, Stripe, SMTP, and Notify.lk. **No publicly reachable inbound endpoint is required**, since all Stripe traffic is outbound (ADR-014).
 
 ### C2.4 Design and implementation constraints
 React frontend in TypeScript; Node.js-only backend in JavaScript (ADR-008); MongoDB-only database; WebSockets mandatory; distributed across containers; no other server or language permitted. Third-party SaaS APIs are consumed over HTTPS and introduce no additional application server (§A4.3).
@@ -1248,7 +1236,7 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 |---|---|---|---|
 | FR-13 | M | A user can request a password reset by email | Response identical whether or not the account exists (FR-16) |
 | FR-14 | M | A reset email contains a single-use link valid for 60 minutes | Token stored hashed; `usedAt` recorded on use |
-| FR-15 | M | A valid reset link allows setting a new password | New password bcrypt-hashed; all outstanding reset tokens invalidated; **all existing JWT sessions invalidated via the `jti` denylist** (ADR-013) — a token issued before the reset is rejected afterwards |
+| FR-15 | M | A valid reset link allows setting a new password | New password bcrypt-hashed; all outstanding reset tokens invalidated; **all existing JWT sessions invalidated via a `jti` entry written to the `revokedtokens` TTL collection** (ADR-013 Option D) — a token issued before the reset is rejected afterwards |
 | FR-16 | M | The reset endpoint does not disclose account existence | Same body, status, and comparable timing in both cases |
 | FR-17 | M | An expired or used reset token is rejected | 400 with a clear message and a link to request a new one |
 | FR-18 | S | Reset requests are rate-limited per email and IP | Excess requests return 429 |
@@ -1258,18 +1246,18 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | ID | Pri | Requirement | Acceptance criterion |
 |---|---|---|---|
 | FR-19 | M | Any user can browse films currently showing | Returns films with at least one future showtime |
-| FR-20 | M | Any user can view a film's detail and its showtimes | Includes synopsis, certificate, runtime, cinema, screen, time, price |
+| FR-20 | M | Any user can view a film's detail and its showtimes | Includes synopsis, certificate, runtime, cinema, screen, time, and price broken down by seat tier (STANDARD/PREMIUM/RECLINER, D8) |
 | FR-21 | S | A user can filter showtimes by cinema, date, and time | Filters narrow results correctly and combine |
 | FR-22 | M | An admin can perform full CRUD on films | Create, read, update, delete all persist and are reflected in listings |
 | FR-23 | M | An admin can perform full CRUD on cinemas and their screens | Screen seat layout defined on creation; deletion blocked if showtimes reference it |
-| FR-24 | M | An admin can perform full CRUD on showtimes | Showtime derives its seat array from the screen layout; start time must be future |
+| FR-24 | M | An admin can perform full CRUD on showtimes | Showtime derives its seat array from the screen layout, freezing each seat's actual price from its section's tier multiplier (STANDARD ×1.00 / PREMIUM ×1.35 / RECLINER ×1.80, D8) at creation time; start time must be future |
 | FR-25 | S | Cancelling a showtime cancels its bookings and notifies affected customers | Bookings marked cancelled; email and SMS dispatched; refunds initiated |
 
 ### C4.5 Seat map, holds, and realtime
 
 | ID | Pri | Requirement | Acceptance criterion |
 |---|---|---|---|
-| FR-26 | M | A showtime page displays a seat map with per-seat state | Available, held, selected, and booked are visually and textually distinct |
+| FR-26 | M | A showtime page displays a seat map with per-seat state and seat tier | Available, held, selected, and booked are visually and textually distinct; STANDARD/PREMIUM/RECLINER sections are visually and textually distinct from each other (D8), independent of any dynamic/surge pricing display |
 | FR-27 | M | Selecting seats and proceeding creates a time-limited hold | Seats move to `held` with a 10-minute TTL and a hold reference |
 | FR-28 | M | A hold or booking on one client updates all other clients viewing that showtime | Change visible within 1s (p95) with no refresh |
 | FR-29 | M | Concurrent attempts to hold the same seat are prevented | Under 50 simultaneous requests, exactly one succeeds; others receive 409 |
@@ -1310,7 +1298,7 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | FR-48 | S | A confirmed booking triggers a confirmation SMS | Contains reference and showtime; best-effort, never blocking |
 | FR-49 | M | Notification failure never fails or rolls back a paid booking | Booking remains confirmed; failure logged and retried |
 | FR-50 | S | Cancelling a showtime notifies affected customers by email and SMS | All affected customers receive both where deliverable |
-| FR-51 | M | No message ever contains a password, raw token, or card detail | Verified by template review and automated test |
+| FR-51 | M | No password, no card detail, and no token except inside the single-use verification/reset link may ever leave the server in any response or message | Verified by template review and automated test; a verification or reset email legitimately embeds a single-use token in its link, and only there |
 
 **CRUD coverage:** full CRUD for **five** entities — User, Film, Cinema (with Screens), Showtime, Booking — well beyond the required three.
 
@@ -1333,14 +1321,14 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | NFR-13 | Reliability | Payment confirmation idempotent | Repeat confirm calls yield exactly one booking (O8) |
 | NFR-14 | Reliability | Expired holds always release | Correctness independent of sweeper timing (FR-31) |
 | NFR-15 | Reliability | Third-party outage degrades gracefully | Booking succeeds; notification retried; user sees no error |
-| NFR-15a | Reliability | Redis unavailability degrades gracefully | Cache reads fall through to MongoDB; rate limiting falls back in-process; **no request fails because Redis is down** |
-| NFR-15b | Correctness | Seat state is never served from cache | Verified by code review and a test asserting the seat-read path makes no cache call (ADR-013) |
-| NFR-15c | Correctness | Cached catalogue data is invalidated on write | Admin write followed immediately by a read returns the new value, not the cached one |
+| NFR-15a | Reliability | A transient read error against the `revokedtokens`/`ratelimits` TTL collections degrades safely | A rate-limit read error never blocks a legitimate request; a revocation read error never allows a revoked token through (ADR-013 Option D) — there is no separate cache tier to "fall through" from, since both collections live in the primary MongoDB cluster |
+| NFR-15b | Correctness | Seat state is never served from any cache | Trivially satisfied — no cache exists anywhere in the system (ADR-013 Option D); verified by code review that the seat-read path has no cache dependency |
+| NFR-15c | Correctness | ~~Cached catalogue data is invalidated on write~~ — **WITHDRAWN** | **Withdrawn.** This requirement presupposed a catalogue cache. ADR-013 Option D drops catalogue caching entirely (a lost secondary benefit, not a regression — see ADR-013 Trade-off analysis), so there is no cached catalogue data to invalidate. The number is retained, marked withdrawn, rather than deleted, so historical references to it are not silently orphaned. |
 | NFR-16 | Portability | Runs on any Docker host given env vars | `docker-compose up` with populated `.env` works on a clean machine |
 | NFR-17 | Maintainability | Layered structure; integrations behind adapters | ESLint zero errors both sides; `tsc --noEmit` clean |
 | NFR-18 | Maintainability | Server line coverage ≥70% | Reported by Jest in CI |
 | NFR-19 | Correctness | API contract verified despite the language seam | Every endpoint covered by a shape-asserting integration test (ADR-008) |
-| NFR-20 | Usability | Seat states distinguishable without relying on colour alone | Verified in UAT and accessibility check |
+| NFR-20 | Usability | Seat states, **and seat tiers (STANDARD/PREMIUM/RECLINER, D8)**, are distinguishable without relying on colour alone | Verified in UAT and accessibility check |
 | NFR-21 | Accessibility | Keyboard navigable, visible focus, reduced motion respected | Automated axe check plus manual keyboard pass |
 | NFR-22 | Privacy | Only necessary personal data collected; never logged | Name, email, phone only; scrubbed from logs |
 
@@ -1350,14 +1338,19 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 
 ```
   User ──< Booking >── Showtime ──> Screen ──> Cinema
-                           │
-                           └──> Film
+    │                      │  │
+    │                      │  └──> Film
+    │                      │
+    └──< Hold >────────────┘
 
   Cinema  1 ──< n  Screen      (screens embedded in cinema)
   Screen  1 ──< n  Showtime
   Film    1 ──< n  Showtime
   User    1 ──< n  Booking
+  User    1 ──< n  Hold
   Showtime 1 ──< n Booking
+  Showtime 1 ──< n Hold        (a Hold is created before payment; not embedded in Booking — D6)
+  Booking  1 ──1  Hold         (Booking.holdRef, unique — the booking a hold eventually produces, if any)
   User    1 ──< n  AuthToken   (verification / reset)
 ```
 
@@ -1407,7 +1400,8 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | `_id` | ObjectId | PK |
 | `name` | String | required |
 | `address` | String | required |
-| `screens` | Array of `{id, name, seatLayout[{id,row,number}], capacity}` | required, ≤300 seats per screen |
+| `city` | String | required — needed so email/SMS notification copy can name the cinema's city without a second lookup |
+| `screens` | Array of `{id, name, seatLayout[{id,row,number,section}], capacity}` | required, ≤300 seats per screen; `section` enum `STANDARD` \| `PREMIUM` \| `RECLINER` (D8) |
 
 **Showtime** (seats embedded — ADR-002)
 
@@ -1417,10 +1411,30 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | `filmRef` | ObjectId → Film | required |
 | `cinemaRef` | ObjectId → Cinema | required |
 | `screenId` | String | required; identifies the embedded screen |
+| `screenName` | String | denormalised copy of the screen's name at creation time — lets showtime listings show which screen without populating the ~300-row seat layout |
 | `startsAt` | Date | required, future on creation |
-| `price` | Number | required, ≥0 |
-| `seats` | Array of `{id, row, number, status, price, holdRef, holdExpiresAt}` | `status` enum `available` \| `held` \| `booked` |
+| `basePrice` | Number | required, ≥0 — the STANDARD-tier price; PREMIUM and RECLINER prices are derived by multiplier at creation time (D8), not renamed at read time |
+| `seats` | Array of `{id, row, number, section, status, price, holdRef, holdExpiresAt}` | `section` enum `STANDARD` \| `PREMIUM` \| `RECLINER`; `price` is `basePrice × tierMultiplier` (STANDARD ×1.00 / PREMIUM ×1.35 / RECLINER ×1.80), frozen per seat at showtime creation so a later tier-multiplier or basePrice change never alters an already-published showtime; `status` enum `available` \| `held` \| `booked` |
 | `status` | String | enum `scheduled` \| `cancelled` |
+
+**Hold** (own collection — D6; not embedded in Booking)
+
+| Field | Type | Constraints |
+|---|---|---|
+| `_id` | ObjectId | PK — this is the `holdId` referenced by seats' `holdRef` and by the client |
+| `userRef` | ObjectId → User | required |
+| `showtimeRef` | ObjectId → Showtime | required |
+| `seatIds` | Array of String | required, non-empty |
+| `seatSnapshot` | Array of `{id, section, price}` | required — the seat facts at the moment of holding, so a later showtime edit cannot retroactively change what this hold is worth |
+| `totalPrice` | Number | computed server-side from `seatSnapshot`; never trusted from client |
+| `amountMinor` | Number | `totalPrice` in Stripe's minor currency unit; the amount actually passed to Stripe |
+| `currency` | String | ISO 4217, e.g. `lkr` |
+| `paymentIntentId` | String \| null | Stripe reference, set once `POST /api/holds/:id/payment-intent` is called (D12); **unique, sparse index** |
+| `status` | String | enum `active` \| `released` \| `consumed` |
+| `expiresAt` | Date | required, `createdAt + 10 min` |
+| `createdAt` | Date | auto |
+
+**No TTL index on `holds`.** Unlike `revokedtokens` and `ratelimits` (ADR-013 Option D), a hold is never automatically deleted. Deleting an expired hold would destroy the record the reconciliation job (FR-39) needs to read — a hold that expired *after* a successful payment is precisely the case reconciliation exists to find and complete (see ADR-012). Expiry is enforced entirely by application logic: every read treats `status === 'active' && expiresAt < now` as expired regardless of whether a sweeper has processed it yet, mirroring the read-time correctness rule ADR-013 applies to the TTL collections.
 
 **Booking**
 
@@ -1430,6 +1444,7 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | `reference` | String | unique, human-readable (e.g. `ENC-4471`) |
 | `userRef` | ObjectId → User | required |
 | `showtimeRef` | ObjectId → Showtime | required |
+| `holdRef` | ObjectId → Hold | required, **unique** — the hold this booking was produced from; a hold can produce at most one booking |
 | `seats` | Array of seat ids | required, non-empty |
 | `totalPrice` | Number | computed server-side; never trusted from client |
 | `paymentIntentId` | String | Stripe reference; **unique index** enforces idempotent confirmation |
@@ -1445,15 +1460,27 @@ MoSCoW prioritised (M/S/C). Each requirement is atomic, testable, and carries an
 | users | `{email: 1}` unique | Login; enforces uniqueness |
 | authtokens | `{tokenHash: 1}` unique | Token lookup |
 | authtokens | `{expiresAt: 1}` TTL | Automatic cleanup of expired tokens |
-| films | `{title: "text", genre: 1}` | Search and filter (FR-21) |
+| films | `{title: "text", synopsis: "text"}` | Free-text search (FR-21) |
+| films | `{genre: 1}` | Filter by genre (FR-21) |
 | showtimes | `{startsAt: 1, status: 1}` | Upcoming listings (FR-19) |
 | showtimes | `{filmRef: 1, startsAt: 1}` | Showtimes for a film (FR-20) |
 | showtimes | `{cinemaRef: 1, startsAt: 1}` | Filter by cinema (FR-21) |
-| showtimes | `{"seats.holdExpiresAt": 1}` | Sweeper query (FR-30) |
+| holds | `{userRef: 1, status: 1}` | A user's active holds |
+| holds | `{showtimeRef: 1, status: 1, expiresAt: 1}` | Sweeper query (FR-30) — reads the `holds` collection directly (see note below) |
+| holds | `{paymentIntentId: 1}` **unique, sparse** | Reconciliation lookup by PaymentIntent; sparse because most holds never reach payment |
 | bookings | `{userRef: 1, createdAt: -1}` | My bookings (FR-43) |
 | bookings | `{showtimeRef: 1}` | Admin per-showtime view (FR-46) |
 | bookings | `{reference: 1}` unique | Reference lookup |
 | bookings | `{paymentIntentId: 1}` **unique** | Reconciliation lookup **and idempotency guard** (FR-37) — a duplicate confirm cannot create a second booking |
+| bookings | `{holdRef: 1}` **unique** | Enforces that a hold produces at most one booking |
+| revokedtokens | `{jti: 1}` unique | Revocation lookup in auth middleware (ADR-013 Option D) |
+| revokedtokens | `{expiresAt: 1}` TTL | Automatic cleanup once the token would have expired anyway |
+| ratelimits | `{key: 1, windowStart: 1}` unique | Atomic per-window counter lookup and increment (ADR-013 Option D) |
+| ratelimits | `{expiresAt: 1}` TTL | Automatic cleanup of expired windows |
+
+**`films` text index — corrected.** An earlier draft specified `{title: "text", genre: 1}` on one compound index. This is invalid: MongoDB does not permit a text index component alongside a non-text component that indexes a multikey (array) field, and `genre` is `[String]`. The fix splits it into two separate indexes: a text index over `title` and `synopsis`, and a plain ascending index over `genre`.
+
+**`showtimes {"seats.holdExpiresAt": 1}` — dropped.** An earlier draft indexed the embedded seat array for the sweeper query. Now that Hold is its own collection (D6), the sweeper queries `holds` directly (`{status: 'active', expiresAt: {$lt: now}}`, served by the index above) rather than scanning every showtime's seat array. Keeping a multikey index over up to 300 array elements per showtime would tax every hold-related write on that showtime for a reader that no longer exists — the index is dropped rather than retained "just in case".
 
 ## C7. Interface specifications
 
@@ -1465,12 +1492,14 @@ All responses JSON. State-changing routes require `Authorization: Bearer <jwt>` 
 
 | Method | Endpoint | Auth | Body | Success | Errors |
 |---|---|---|---|---|---|
-| POST | `/api/auth/register` | — | `{name, email, phone, password}` | 201 `{user, token}` | 400, 429 |
+| POST | `/api/auth/register` | — | `{name, email, phone, password}` | **202 `{message}`** — no token; the account exists but is unverified (D14) | 400, 429 |
 | POST | `/api/auth/verify-email` | — | `{token}` | 200 `{verified: true}` | 400 invalid/expired/used |
 | POST | `/api/auth/resend-verification` | Any | — | 202 (always) | 429 |
 | POST | `/api/auth/login` | — | `{email, password}` | 200 `{user, token}` | 401, 429 |
 | POST | `/api/auth/forgot-password` | — | `{email}` | 202 (always, regardless of existence) | 429 |
 | POST | `/api/auth/reset-password` | — | `{token, password}` | 200 | 400 invalid/expired/used |
+
+**Login is the only token issuer (D14).** Registration returns `202 {message}` with no JWT — an unverified, unauthenticated account cannot yet do anything a token would be needed for, and issuing one at registration only to reject its use everywhere except `/api/auth/verify-email` invited confusion. A JWT is issued exclusively by `POST /api/auth/login`.
 
 **Users**
 
@@ -1488,6 +1517,7 @@ All responses JSON. State-changing routes require `Authorization: Bearer <jwt>` 
 | GET | `/api/films/:id` | — | 200 `{film, showtimes[]}` | 404 |
 | POST/PATCH/DELETE | `/api/films/:id?` | Admin | 201/200/204 | 400, 401, 403, 404 |
 | GET | `/api/cinemas` | — | 200 `{items}` | — |
+| GET | `/api/cinemas/:id` | — | 200 `{cinema}` (includes `screens[]`, `city`) | 404 `CINEMA_NOT_FOUND` |
 | POST/PATCH/DELETE | `/api/cinemas/:id?` | Admin | 201/200/204 | 400, 403, 404, 409 in-use |
 | GET | `/api/showtimes` | — | `?filmId&cinemaId&date&page&limit` → 200 | 400 |
 | GET | `/api/showtimes/:id` | — | 200 `{showtime, seats[]}` | 404 |
@@ -1497,17 +1527,36 @@ All responses JSON. State-changing routes require `Authorization: Bearer <jwt>` 
 
 | Method | Endpoint | Auth | Body | Success | Errors |
 |---|---|---|---|---|---|
-| POST | `/api/holds` | Verified customer | `{showtimeId, seatIds[]}` | 201 `{holdId, expiresAt, clientSecret, amount}` | 400, 401, **403 `EMAIL_NOT_VERIFIED`**, **409 `SEAT_UNAVAILABLE`** |
-| DELETE | `/api/holds/:id` | Verified customer | — | 204 (seats released) | 401, 403, 404 |
+| POST | `/api/holds` | Verified customer | `{showtimeId, seatIds[]}` | 201 `{holdId, expiresAt, amountMinor, currency}` — **creates the Hold only; makes no Stripe call** (D12) | 400, 401, **403 `EMAIL_NOT_VERIFIED`**, **409 `SEAT_UNAVAILABLE`** |
+| POST | `/api/holds/:id/payment-intent` | Verified customer, hold owner | — | 201 `{clientSecret, expiresAt, amount}` — **creates the Stripe PaymentIntent for an existing hold** (D12) | 400, 401, 403 not owner, **404 `HOLD_NOT_FOUND`**, 409 `HOLD_EXPIRED` |
+| DELETE | `/api/holds/:id` | Verified customer | — | 204 (seats released) | 401, 403, 404 `HOLD_NOT_FOUND` |
 | POST | `/api/bookings/confirm` | Verified customer | **`{holdId}` only** | 200 `{booking}` | 400, 401, **403 not owner**, **402 `PAYMENT_NOT_SUCCEEDED`**, **409 `HOLD_EXPIRED`** |
 | GET | `/api/bookings/by-hold/:holdId` | Verified customer | — | 200 `{booking}` / 404 while pending | 401, 403 |
 | GET | `/api/bookings/me` | Customer | `?page&limit` | 200 paginated | 401 |
+| GET | `/api/bookings/:id` | Customer (own) or Admin | — | 200 `{booking}` | 401, 403 not owner, 404 |
 | PATCH | `/api/bookings/:id/cancel` | Customer | — | 200 `{booking}` | 401, 403 not owner, 404, 409 too late |
 | GET | `/api/bookings` | Admin | `?showtimeId&page&limit` | 200 paginated | 401, 403 |
 | POST | `/api/bookings/:id/refund` | Admin | — | 200 `{booking}` | 403, 404, 409 |
+| GET | `/api/admin/stats` | Admin | — | 200 `{bookingsToday, revenueToday, occupancyByShowtime[]}` | 401, 403 |
+| GET | `/api/admin/showtimes` | Admin | `?page&limit` | 200 paginated — admin listing including cancelled/past showtimes, unlike the public `GET /api/showtimes` | 401, 403 |
 | GET | `/api/health` | — | — | 200 `{status, db, integrations}` | 503 |
 
-**Confirm endpoint — security rules (ADR-014).** `POST /api/bookings/confirm` accepts **only** `{holdId}`. It must reject any request body containing an amount, a payment status, or a `paymentIntentId` — accepting any of these would move authority to the client. The server loads the hold, verifies ownership and expiry, then retrieves the PaymentIntent from Stripe with the **secret key** and independently verifies status, amount, currency, and `metadata.holdId` before allocating a single seat.
+**Development-only**
+
+| Method | Endpoint | Auth | Success | Errors |
+|---|---|---|---|---|
+| GET | `/api/dev/last-mail` | — | 200 `{to, subject, html, text}` — the last email dispatched via the Nodemailer adapter | 404 none sent yet |
+
+`GET /api/dev/last-mail` exists so e2e tests can read a verification or password-reset link without a real mailbox (D13). **It is disabled whenever `NODE_ENV=production`**, returning 404 unconditionally in that environment — the route is not merely undocumented in production, it is inert.
+
+**Removed endpoints**
+
+| Endpoint | Reason removed |
+|---|---|
+| `POST /api/webhooks/stripe` | Webhooks are removed entirely (D7); confirmation is now server-side PaymentIntent retrieval only (ADR-014). The old handler had no signing-secret verification — a genuine security hole — so it is deleted rather than fixed. |
+| `GET/POST /api/events`, `/api/venues`, `/api/artists` (concert domain) | Superseded by `/api/showtimes`, `/api/cinemas`, `/api/films` respectively as part of the cinema-domain migration (D1). |
+
+**Confirm endpoint — security rules (ADR-014).** `POST /api/bookings/confirm` accepts **only** `{holdId}`. The request body is validated with a **strict schema (zod `.strict()`)**: any unexpected field — an `amount`, a payment status, a `paymentIntentId`, or anything else not in the schema — causes the whole request to be **rejected with 400 `VALIDATION_ERROR`**, not silently stripped and ignored. Silently ignoring an unexpected field is a weaker guarantee than rejecting it outright: a client that thinks it is asserting a fact (however futile) should be told its request was malformed, not have that field quietly discarded, since a permissive parser is also the mechanism by which a genuine schema-confusion bug goes unnoticed. The server loads the hold, verifies ownership and expiry, then retrieves the PaymentIntent from Stripe with the **secret key** and independently verifies status, amount, currency, and `metadata.holdId` before allocating a single seat. (§D4.2's integration test for this endpoint is written against this rule — see the note there.)
 
 **No inbound webhook endpoint exists.** All Stripe traffic is outbound, which is why no publicly reachable URL, signature verification, raw-body handling, or webhook secret is required.
 
@@ -1519,21 +1568,26 @@ All responses JSON. State-changing routes require `Authorization: Bearer <jwt>` 
              "details": { "seatIds": ["F-12"] } } }
 ```
 
-**Error codes:** `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `EMAIL_EXISTS`, `EMAIL_NOT_VERIFIED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, `TOKEN_USED`, `SEAT_UNAVAILABLE`, `HOLD_EXPIRED`, `PAYMENT_FAILED`, `PAYMENT_NOT_SUCCEEDED`, `PAYMENT_AMOUNT_MISMATCH`, `CINEMA_IN_USE`, `RATE_LIMITED`, `SERVER_ERROR`.
+**Error codes:** `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `EMAIL_EXISTS`, `EMAIL_NOT_VERIFIED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`, `TOKEN_USED`, `TOKEN_REVOKED`, `SEAT_UNAVAILABLE`, `HOLD_EXPIRED`, `HOLD_NOT_FOUND`, `PAYMENT_FAILED`, `PAYMENT_NOT_SUCCEEDED`, `PAYMENT_AMOUNT_MISMATCH`, `CINEMA_IN_USE`, `CINEMA_NOT_FOUND`, `FILM_NOT_FOUND`, `FILM_IN_USE`, `SCREEN_NOT_FOUND`, `SHOWTIME_NOT_FOUND`, `SHOWTIME_STARTED`, `SHOWTIME_CANCELLED`, `ALLOCATION_FAILED`, `RATE_LIMITED`, `SERVER_ERROR`.
+
+`TOKEN_REVOKED` is distinct from `TOKEN_EXPIRED`: it is returned when a JWT is structurally valid and unexpired but its `jti` is present in `revokedtokens` (ADR-013 Option D) — the FR-15 session-invalidation path. `SHOWTIME_STARTED` and `SHOWTIME_CANCELLED` are returned when an action (hold, booking, cancellation) is attempted against a showtime that has already begun or been cancelled. `FILM_IN_USE` mirrors `CINEMA_IN_USE`: an admin cannot delete a film with existing showtimes. `ALLOCATION_FAILED` is returned to admin-facing views for a booking whose payment succeeded but seat allocation failed (FR-40) — it is a booking state, not a rejection of the current request.
 
 Stack traces and raw driver or Stripe errors are never returned to the client. A payment verification failure returns a generic message; the specific mismatch (amount, currency, metadata) is logged server-side only, so a probing client learns nothing.
 
 ### C7.2 WebSocket event catalogue
 
-Namespace `/`, rooms named `showtime:<showtimeId>`. Handshake carries the JWT; unauthenticated sockets may join read-only.
+Namespace `/`. Handshake carries the JWT; unauthenticated sockets may join read-only.
+
+**Room-naming convention.** Two room families exist: `showtime:<id>`, joined by any client (authenticated or not) viewing that showtime's seat map, and `user:<id>`, joined automatically by an authenticated socket's own connection to receive account-specific pushes that are not showtime-scoped. A booking's cancel/refund update, for instance, goes to `user:<id>` because the viewer is not necessarily still looking at that showtime's seat map.
 
 | Direction | Event | Payload | Purpose |
 |---|---|---|---|
-| Client → Server | `join:showtime` | `{showtimeId}` | Subscribe to seat updates |
+| Client → Server | `join:showtime` | `{showtimeId}` | Subscribe to seat updates; joins room `showtime:<showtimeId>` |
 | Client → Server | `leave:showtime` | `{showtimeId}` | Unsubscribe on navigation |
-| Server → Client | `seats:updated` | `{showtimeId, seatIds[], status}` | Broadcast on hold, release, booking, or cancellation |
-| Server → Client | `booking:confirmed` | `{holdId, bookingId, reference}` | Emitted when reconciliation completes a booking whose confirm call never arrived (ADR-014) |
-| Server → Client | `showtime:cancelled` | `{showtimeId}` | Admin cancelled the showtime |
+| Server → Client | `seats:updated` | `{showtimeId, seatIds[], status}` | Broadcast to `showtime:<id>` on hold, release, booking, or cancellation |
+| Server → Client | `booking:confirmed` | `{holdId, bookingId, reference}` | Emitted to `showtime:<id>` when reconciliation completes a booking whose confirm call never arrived (ADR-014); the client resolves a reconciling `?hold=` confirmation against this event |
+| Server → Client | `booking:updated` | `{bookingId, status, paymentStatus}` | **New (this amendment).** Emitted to `user:<id>` when a booking's status or payment status changes outside the original confirm flow — cancellation, refund, or an admin-triggered update |
+| Server → Client | `showtime:cancelled` | `{showtimeId}` | Admin cancelled the showtime; broadcast to `showtime:<id>` |
 | Server → Client | `error` | `{code, message}` | Malformed subscription or auth failure |
 
 Broadcasts are emitted **only after** the database write commits, so no client observes state the server has not persisted.
@@ -1583,9 +1637,9 @@ Each integration sits behind an adapter interface. **No test makes a real outbou
 | FR-34–41 payment | PaymentService, retrieval verifier, unique paymentIntentId index, reconciliation job | ADR-009 (superseded), ADR-014 |
 | FR-42–46 bookings | Booking service | ADR-002, ADR-012 |
 | FR-47–51 notifications | NotificationService adapters | ADR-010 |
-| NFR-2 | Indexes + catalogue cache | ADR-006 (superseded), ADR-013 |
-| FR-15 session revocation | JWT `jti` denylist in Redis | ADR-005, ADR-013 |
-| FR-10/18 rate limiting | Redis counters | ADR-013 |
+| NFR-2 | Indexes (no cache of any kind) | ADR-006 (amended by ADR-013), ADR-013 |
+| FR-15 session revocation | JWT `jti` in the `revokedtokens` MongoDB TTL collection | ADR-005, ADR-013 |
+| FR-10/18 rate limiting | `ratelimits` MongoDB TTL collection | ADR-013 |
 | NFR-19 | Integration shape assertions | ADR-008 |
 
 ## C9. Requirements traceability to rubric
@@ -1593,11 +1647,11 @@ Each integration sits behind an adapter interface. **No test makes a real outbou
 | Rubric category | Satisfied by |
 |---|---|
 | Analysis (10%) | §A2–A5, §C3–C5 — users, benefits, prioritised testable requirements |
-| Design (20%) | §A6 component diagram and data flow, §C6–C7 data model and contracts, Part B (12 ADRs) |
+| Design (20%) | §A6 component diagram and data flow, §C6–C7 data model and contracts, Part B (14 ADRs) |
 | Software (30%) | FR-1–51 — CRUD ×5, WebSockets, holds, payments, notifications, production auth |
 | Testing (20%) | Part D — pyramid, coverage targets, four levels, integration mocking strategy |
 | CI/CD (10%) | §A9, §D7 |
-| Evaluation (10%) | O1–O9, ADR "revisit when" triggers, ADR-004 supersession narrative, §D8 |
+| Evaluation (10%) | O1–O10, ADR "revisit when" triggers, ADR-004 and ADR-009 supersession narratives, §D8 |
 
 ---
 
@@ -1609,7 +1663,7 @@ The **testing pyramid**: many fast unit tests over business logic, a middle band
 
 ```
                     ╱────────────╲
-                   ╱   System /   ╲        ~8 tests   slow, high confidence
+                   ╱   System /   ╲        ~11 tests  slow, high confidence
                   ╱      E2E       ╲
                  ╱──────────────────╲
                 ╱    Integration     ╲     ~50 tests  medium speed
@@ -1630,10 +1684,10 @@ An inverted pyramid is slow and brittle; an all-unit suite misses the integratio
 
 - **Business-critical paths** — registration, verification, login, reset, hold, payment, booking, cancellation.
 - **Security boundaries** — every authorisation check: unauthenticated, wrong-role, cross-user, and **unverified-user-cannot-book** (FR-6).
-- **Data integrity** — concurrency (O7), server-side price computation, confirmation idempotency (O8), **that the confirm endpoint trusts no client-supplied payment fact**, cache invalidation, and the absolute prohibition on cached seat state.
-- **Token handling** — expiry, single-use, hash-at-rest, invalidation on password change.
+- **Data integrity** — concurrency (O7), server-side price computation with frozen tier multipliers (D8), confirmation idempotency (O8), **that the confirm endpoint rejects — not merely ignores — any client-supplied payment fact** (strict schema validation, §C7.1), and the absolute prohibition on cached seat state (no cache of any kind exists, ADR-013 Option D).
+- **Token handling** — expiry, single-use, hash-at-rest, invalidation on password change, and the read-time correctness rule for `revokedtokens`/`ratelimits` (a row past `expiresAt` is absent even if not yet reaped).
 - **Enumeration resistance** — identical responses for existing and non-existing emails.
-- **Error handling** — 409 conflict, hold expiry, invalid signature, third-party failure.
+- **Error handling** — 409 conflict, hold expiry, strict-schema rejection of an unexpected confirm-body field, third-party failure.
 - **Edge cases** — zero seats, already-held seats, past showtimes, expired holds, duplicate confirm calls, paid-but-abandoned holds, empty results, pagination boundaries.
 
 **Deliberately not tested:**
@@ -1641,7 +1695,7 @@ An inverted pyramid is slow and brittle; an all-unit suite misses the integratio
 - Mongoose, Express, Stripe SDK internals — third-party code with its own suites.
 - Actual email or SMS delivery — adapters are mocked; **no test makes a real outbound call**.
 - Stripe's own payment processing — we test our handling of its responses, not Stripe itself.
-- Redis's own correctness — we test our cache logic, invalidation, and fallback behaviour, not Redis.
+- MongoDB's own TTL-reaper timing — we test that our read paths never depend on it (the read-time correctness rule), not the reaper's schedule itself.
 - Trivial pass-through mappers with no logic.
 - Exact CSS values — covered by manual review.
 
@@ -1666,32 +1720,32 @@ Coverage is a floor for confidence, not a goal. The report discusses *what* is c
 |---|---|
 | `passwordService` | Bcrypt hash differs per call; verify succeeds only for correct password |
 | `tokenService` | Token is ≥32 random bytes; only the hash is stored; expired token rejected; used token rejected; timing-safe comparison used |
-| `pricingService` | Total computed from stored seat prices; client-supplied amount ignored; empty selection → 0 |
-| `holdService` | Expired hold treated as available regardless of stored status (FR-31) |
+| `pricingService` | Total computed from stored seat prices and frozen per-seat tier multipliers (STANDARD ×1.00 / PREMIUM ×1.35 / RECLINER ×1.80, D8); client-supplied amount rejected, not merely ignored; empty selection → 0 |
+| `holdService` | Expired hold treated as available regardless of stored status (FR-31); a hold document is never deleted on expiry, only transitioned to `released` |
 | `confirmService` | Succeeded intent with matching amount → allocates; wrong status → rejects; amount mismatch → rejects; `metadata.holdId` mismatch → rejects; hold owned by another user → rejects |
-| `notificationService` | Retries ×3 then logs; SMS failure never throws to caller; templates contain no token or password (FR-51) |
+| `notificationService` | Retries ×3 then logs; SMS failure never throws to caller; templates contain no password or card detail, and no token outside a verification/reset link (FR-51) |
 | `roleGuard` / `verifiedGuard` | Admin allowed; customer 403; anonymous 401; unverified user blocked from booking |
-| `cacheService` | Hit returns cached value; miss falls through to loader; **Redis unreachable falls through to MongoDB without throwing** (NFR-15a); invalidation removes the key |
-| `tokenDenylist` | A revoked `jti` is rejected; entry TTL matches remaining token life; denylist miss allows the token |
+| `rateLimitService` | A row with `expiresAt` in the past is treated as absent even if still physically present (ADR-013 read-time correctness rule); atomic increment under concurrent attempts never under-counts |
+| `tokenRevocationService` | A revoked `jti` present in `revokedtokens` is rejected even if its row has not yet been TTL-reaped; entry `expiresAt` matches remaining token life; no matching row allows the token |
 
 ### D4.2 Integration tests (Jest + Supertest, `mongodb-memory-server`)
 
 | Target | Example cases |
 |---|---|
-| `POST /api/auth/register` | 201 with token; verification token persisted hashed; **response identical for an existing email** (FR-7); hash absent from response body |
+| `POST /api/auth/register` | **202, no token in body** (D14); verification token persisted hashed; **response identical for an existing email** (FR-7); hash absent from response body |
 | `POST /api/auth/verify-email` | Valid token verifies; reuse rejected; expired rejected |
 | `POST /api/auth/login` | 200 with token; 401 on wrong password; identical error for unknown email; 429 after repeated failures |
 | `POST /api/auth/forgot-password` | **202 whether or not the account exists** (FR-16); token hashed with 60-min TTL |
 | `POST /api/auth/reset-password` | Valid token sets password; all outstanding tokens invalidated; reuse rejected |
 | `POST /api/holds` | 201 holds seats and sets TTL; 409 when already held; **403 for an unverified user** (FR-6) |
-| `POST /api/bookings/confirm` | Succeeded intent creates a booking; **calling twice creates exactly one** (FR-37); non-succeeded intent → 402 and no booking; another user's hold → 403; **a body containing `amount` or `status` is ignored entirely** |
-| Price integrity | A spoofed `amount` or `totalPrice` in the request body is ignored; server value used |
+| `POST /api/bookings/confirm` | Succeeded intent creates a booking; **calling twice creates exactly one** (FR-37); non-succeeded intent → 402 and no booking; another user's hold → 403; **a body containing an unexpected field such as `amount` or `status` is rejected with 400 `VALIDATION_ERROR` (zod `.strict()`) — not silently ignored** (§C7.1) |
+| Price integrity | A spoofed `amount` or `totalPrice` field is rejected by strict schema validation before the handler runs; the server never computes a price from anything but stored seat prices |
 | `GET /api/bookings/me` | Returns only the caller's bookings; response shape matches the client's declared type (NFR-19) |
 | `DELETE /api/cinemas/:id` | 409 when showtimes reference it |
-| Cache invalidation | Admin updates a film → immediate GET returns the new value, not the cached one (NFR-15c) |
-| **Seat state never cached** | `GET /api/showtimes/:id` makes no cache read for seat status; a stale cache entry cannot affect availability (NFR-15b) |
+| ~~Cache invalidation~~ | **Removed — NFR-15c withdrawn.** No catalogue cache exists (ADR-013 Option D), so there is nothing to invalidate; an admin update is visible on the very next read by construction. |
+| **No cache exists anywhere** | `GET /api/showtimes/:id` and `GET /api/films` make no cache read of any kind; a stale value cannot affect availability or catalogue accuracy (NFR-15b) |
 | Session revocation | Token issued, password reset performed, **same token now returns 401** (FR-15) |
-| Rate limiting | Counters shared via Redis; limit not reset by simulating a process restart |
+| Rate limiting | Counters shared via the `ratelimits` MongoDB collection (ADR-013 Option D); limit not reset by simulating a process restart |
 
 ### D4.3 Critical integrity tests
 
@@ -1714,17 +1768,19 @@ These four are the direct evidence that ADR-012, ADR-013, and ADR-014 work, and 
 
 ### D4.4 System / end-to-end tests
 
-| Journey | Steps |
-|---|---|
-| Full booking with payment | Register → verify email → browse film → pick showtime → select seats → hold → pay with Stripe test card → server retrieves and verifies → confirmation shown with reference |
-| Abandoned tab recovery | Pay with a test card, close the tab before confirm; reconciliation completes the booking and the customer receives confirmation |
-| Realtime propagation | Two browser contexts on one showtime; a hold in A greys those seats in B within 1s, no refresh |
-| Hold expiry visible | Hold seats in A, abandon; after expiry the seats return to available in B |
-| Password reset round-trip | Request reset → open link → set new password → old password rejected, new accepted |
-| Verification gate | Unverified user attempts to book → blocked with a clear message |
-| Admin lifecycle | Admin creates cinema, screen, film, showtime; appears publicly; cancels it; customer notified |
-| Cancellation round-trip | Customer cancels; seats released and broadcast to a second client |
-| Auth enforcement | Direct navigation to an admin route as a customer is blocked |
+Journeys are numbered **J1–J9** and the numbering is stable — test specs cite these IDs directly, so a journey keeps its number even if its steps are refined later.
+
+| ID | Journey | Steps |
+|---|---|---|
+| J1 | Registration and verification, then full booking with payment | Register (202, no token — D14) → verify email via the link surfaced by `GET /api/dev/last-mail` (D13) → log in (only place a token is issued) → browse film → pick showtime → select seats → create hold (`POST /api/holds`, no Stripe call — D12) → create PaymentIntent (`POST /api/holds/:id/payment-intent` — D12) → pay with Stripe test card → server retrieves and verifies → confirmation shown with reference |
+| J2 | Browse and filter films | Visitor browses films now showing, opens a film's detail, filters showtimes by cinema/date/time (FR-19–21); no authentication required |
+| J3 | Abandoned tab recovery | Pay with a test card, close the tab before confirm; reconciliation completes the booking and the customer receives confirmation and `booking:confirmed` |
+| J4 | Realtime seat updates via socket | Two browser contexts joined to the same `showtime:<id>` room; a hold in A greys those seats in B within 1s via `seats:updated`, no refresh |
+| J5 | Hold expiry — no Stripe key required (D12) | Hold seats in A, abandon; after expiry the seats return to available in B, exercising only `POST /api/holds` and the sweeper, with no PaymentIntent ever created |
+| J6 | Password reset round-trip | Request reset → open link (via `GET /api/dev/last-mail`, D13) → set new password → old password rejected, new accepted → a JWT issued before the reset is rejected afterwards (`TOKEN_REVOKED`, FR-15) |
+| J7 | Verification gate and auth enforcement | Unverified user attempts to book → blocked with `EMAIL_NOT_VERIFIED`; a customer navigating directly to an admin route is blocked with 403 |
+| J8 | Admin CRUD lifecycle | Admin creates cinema (with `city`), screen, film, showtime; appears publicly with correct `screenName` and seat tiers; edits and deletes exercise the full CRUD surface (§C4.4) |
+| J9 | Admin cancellation and refund flow | Admin cancels a showtime; affected bookings are marked cancelled, refunds initiated, customers notified by email and SMS, and `booking:updated` delivered to each customer's `user:<id>` room |
 
 Stripe test cards drive both success and decline paths. **No Stripe CLI or public endpoint is needed** — all Stripe traffic is outbound (ADR-014), which also makes the demonstration video simpler to record.
 
@@ -1764,11 +1820,11 @@ Recording *what changed as a result* is essential — the rubric's top band asks
 
 | Environment | Database | Integrations |
 |---|---|---|
-| Local development | Atlas `encore_dev` + Redis container | Stripe test mode + Stripe CLI; capture mailbox; Notify.lk with limited credit |
-| Automated test (local + CI) | `mongodb-memory-server` + `ioredis-mock`, ephemeral | **All three fully mocked — no outbound calls, no real Redis** |
+| Local development | Atlas `encore_dev` | Stripe test mode (no CLI needed — ADR-014); capture mailbox, also readable via `GET /api/dev/last-mail` (D13); Notify.lk with limited credit |
+| Automated test (local + CI) | `mongodb-memory-server`, ephemeral | **All three fully mocked — no outbound calls** |
 | Demonstration / UAT | Atlas `encore_demo`, seeded | Stripe test mode; capture mailbox; real SMS to the presenter's own number |
 
-**Mocking strategy:** Redis is replaced with `ioredis-mock` so no test needs a running server. Stripe is mocked at the adapter with fixtures for `payment_intent.succeeded` and `payment_intent.payment_failed`, plus a signed-payload helper for signature verification. Nodemailer uses a fake transport capturing messages in memory so templates can be asserted. Notify.lk uses a fake HTTP client. **This is what makes the suite fast, deterministic, offline-capable, and free of accidental charges or spam.**
+**Mocking strategy:** Stripe is mocked at the adapter with fixtures for `payment_intent.succeeded` and `payment_intent.payment_failed` retrieval responses — there is no signature verification to mock, since no webhook exists (D7). Nodemailer uses a fake transport capturing messages in memory, exposed to e2e tests via `GET /api/dev/last-mail` (D13) so templates and links can be asserted without a real mailbox. Notify.lk uses a fake HTTP client. **This is what makes the suite fast, deterministic, offline-capable, and free of accidental charges or spam.**
 
 **Seed fixtures:** two cinemas with three screens, five films, twelve showtimes across future dates, one admin, three verified customers, one unverified customer. Each suite resets the database before running so tests never depend on ordering.
 
@@ -1793,7 +1849,7 @@ Recording *what changed as a result* is essential — the rubric's top band asks
 | FR-47–51 notifications | ✔ | ✔ | ✔ | — | ✔ |
 | NFR-4–11 security | ✔ | ✔ | ✔ | — | — |
 | NFR-12–15 reliability | ✔ | ✔ | ✔ | — | — |
-| NFR-15a–c cache correctness | ✔ | ✔ | — | — | — |
+| NFR-15a/b ephemeral-state and no-cache correctness (NFR-15c withdrawn) | ✔ | ✔ | — | — | — |
 | NFR-20/21 usability + a11y | — | — | — | ✔ | ✔ |
 
 Every "Must" requirement is covered at two or more levels.
@@ -1806,7 +1862,7 @@ GitHub Actions runs on every push and pull request, fastest feedback first:
 2. **Lint** — ESLint on client and server.
 3. **Type-check** — `tsc --noEmit` on the client (NFR-17).
 4. **Unit tests** — seconds.
-5. **Integration tests** — against `mongodb-memory-server` with `ioredis-mock`, all third parties mocked, so the pipeline never depends on Atlas, Redis, Stripe, SMTP, or Notify.lk availability. These also assert response shape, standing in for the compile-time API contract the language split forgoes (NFR-19).
+5. **Integration tests** — against `mongodb-memory-server`, all third parties mocked, so the pipeline never depends on Atlas, Stripe, SMTP, or Notify.lk availability. These also assert response shape, standing in for the compile-time API contract the language split forgoes (NFR-19).
 6. **Critical integrity tests** — concurrency, confirmation idempotency and reconciliation, hold expiry, session revocation (D4.3).
 7. **Coverage report** — fails below the NFR-18 threshold.
 8. **Secret scan** — fails if a credential pattern appears in the diff.
@@ -1823,8 +1879,7 @@ System/E2E tests run on demand and before each milestone rather than every push,
 - **Real deliverability of email and SMS is not automatically tested.** Adapters are mocked in CI; actual delivery is verified manually before the demo. A genuine deliverability failure (spam filtering, carrier rejection) would not be caught by the pipeline.
 - **Stripe's own behaviour is assumed correct.** We test our handling of its responses; we do not test Stripe.
 - **Confirmation depends on the client returning, or on reconciliation.** Unlike a webhook, nothing pushes the result to us, so a booking can be delayed by up to the reconciliation interval (2 minutes). This is an accepted coursework trade (ADR-014) and would be the wrong choice in production.
-- **Cache behaviour under memory pressure is untested.** Eviction policy is left at the Redis default; behaviour when the working set exceeds available memory is not exercised.
-- **Single-instance realtime is untested at scale.** Cross-instance broadcast (the Redis adapter path in ADR-003) is neither implemented nor exercised.
+- **Single-instance realtime is untested at scale.** Cross-instance broadcast is neither implemented nor exercised — ADR-013 Option D deliberately does not provide a pub/sub path, and multi-instance deployment remains out of scope (§A4.2).
 
 ---
 
@@ -1836,7 +1891,7 @@ System/E2E tests run on demand and before each milestone rather than every push,
 | React frontend (TypeScript permitted) | §A6.3, §C2.4, ADR-008 |
 | Node.js backend (server-side JavaScript) | §A6, ADR-001, ADR-008 |
 | MongoDB via web-service API | §C6, §C7.1, ADR-002, ADR-007 |
-| **Only permitted database types** | MongoDB is the sole system of record; Redis is ephemeral infrastructure — **⚠️ confirm with module leader** (§A4.3, ADR-013, R20) |
+| **Only permitted database types** | MongoDB is the sole datastore of any kind — durable collections and ephemeral TTL collections alike (§A4.3, ADR-013 Option D). No second database is used; the compliance question this raised in earlier drafts is closed, not merely mitigated. |
 | No other server or language | §A4.3 — third-party SaaS consumed over HTTPS, no added application server |
 | WebSockets for multi-client appearance | FR-26–33, §C7.2, ADR-003 |
 | Interactive (keyboard/mouse) | §C2.3, NFR-21 |
