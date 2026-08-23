@@ -1,7 +1,8 @@
 import { sendEmail } from './emailService.js';
 import { sendSms } from './smsService.js';
 import { logger } from '../../config/logger.js';
-import { welcomeTemplate } from '../../templates/email/welcome.js';
+import { verifyEmailTemplate } from '../../templates/email/verifyEmail.js';
+import { passwordResetTemplate } from '../../templates/email/passwordReset.js';
 import { bookingConfirmedTemplate } from '../../templates/email/bookingConfirmed.js';
 import { bookingCancelledTemplate } from '../../templates/email/bookingCancelled.js';
 import { eventCancelledTemplate } from '../../templates/email/eventCancelled.js';
@@ -28,9 +29,16 @@ async function safely(label, work) {
   }
 }
 
-export function notifyWelcome(user) {
-  safely('welcome email', async () => {
-    const { subject, html, text } = welcomeTemplate({ name: user.name });
+export function notifyVerifyEmail({ user, verifyUrl }) {
+  safely('verify-email email', async () => {
+    const { subject, html, text } = verifyEmailTemplate({ name: user.name, verifyUrl });
+    await sendEmail({ to: user.email, subject, html, text });
+  });
+}
+
+export function notifyPasswordReset({ user, resetUrl }) {
+  safely('password-reset email', async () => {
+    const { subject, html, text } = passwordResetTemplate({ name: user.name, resetUrl });
     await sendEmail({ to: user.email, subject, html, text });
   });
 }

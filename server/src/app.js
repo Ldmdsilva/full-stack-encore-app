@@ -12,6 +12,7 @@ import bookingRoutes from './routes/bookingRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
+import devRoutes from './routes/devRoutes.js';
 import { errorHandler, AppError } from './middleware/errorHandler.js';
 
 const app = express();
@@ -41,6 +42,13 @@ app.use('/api/venues', venueRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/health', healthRoutes);
+
+// Dev-only convenience routes (e.g. reading the last email sent to an
+// address, for local dev / e2e tests without a real mailbox) — never
+// mounted in production.
+if (env.NODE_ENV !== 'production') {
+  app.use('/api/dev', devRoutes);
+}
 
 // Catch-all for unhandled routes
 app.use((req, res, next) => {

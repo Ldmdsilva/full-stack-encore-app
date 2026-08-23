@@ -3,6 +3,7 @@ import { connectTestDB, clearTestDB, closeTestDB } from '../helpers/db.js';
 import { createStripeMock, mockStripeModule } from '../helpers/mocks.js';
 import Venue from '../../src/models/Venue.js';
 import Event from '../../src/models/Event.js';
+import User from '../../src/models/User.js';
 
 // Stripe must be mocked before the dynamic import of bookingService below,
 // since bookingService -> paymentService -> config/stripe.js -> 'stripe'.
@@ -43,13 +44,15 @@ describe('Event & Booking Services Extended Coverage (§D4.1, §D4.2)', () => {
       capacity: 2,
     });
 
-    const reg = await authService.register({
+    // register() now returns { message } only (202, no user/token — D14),
+    // so fetch the created User document directly to get its id/email.
+    await authService.register({
       name: 'Test Customer',
       email: 'customer.test@encore.com',
       password: 'password123',
       phone: '0771234567',
     });
-    user = reg.user;
+    user = await User.findOne({ email: 'customer.test@encore.com' });
   });
 
   it('FR-10: creates event inheriting venue layout with prices set to basePrice', async () => {

@@ -42,7 +42,7 @@ describe('Encore REST API Integration Tests (§C7.1, §D4.2, ADR-008)', () => {
   });
 
   describe('Authentication Endpoints (FR-1, FR-2, FR-3, FR-4)', () => {
-    it('POST /api/auth/register registers user and returns 201 with JWT', async () => {
+    it('POST /api/auth/register returns 202 with a generic message and no token (D14)', async () => {
       const res = await request(app)
         .post('/api/auth/register')
         .send({
@@ -52,13 +52,35 @@ describe('Encore REST API Integration Tests (§C7.1, §D4.2, ADR-008)', () => {
           phone: '0771234567',
         });
 
-      expect(res.status).toBe(201);
-      expect(res.body).toHaveProperty('token');
-      expect(res.body.user).toHaveProperty('id');
-      expect(res.body.user).not.toHaveProperty('_id');
-      expect(res.body.user.email).toBe('sarah@example.com');
-      expect(res.body.user.phone).toBe('94771234567');
-      expect(res.body.user).not.toHaveProperty('passwordHash');
+      expect(res.status).toBe(202);
+      expect(res.body).toHaveProperty('message');
+      expect(res.body).not.toHaveProperty('token');
+      expect(res.body).not.toHaveProperty('user');
+
+      const created = await User.findOne({ email: 'sarah@example.com' });
+      expect(created).toBeTruthy();
+      expect(created.emailVerified).toBe(false);
+    });
+
+    it('POST /api/auth/register responds identically for an already-registered email (FR-7, no enumeration)', async () => {
+      const payload = {
+        name: 'Sarah Connor',
+        email: 'sarahdup@example.com',
+        password: 'securePassword99',
+        phone: '0771234567',
+      };
+
+      const first = await request(app).post('/api/auth/register').send(payload);
+      const second = await request(app)
+        .post('/api/auth/register')
+        .send({ ...payload, name: 'Someone Else', password: 'differentPassword1' });
+
+      expect(second.status).toBe(202);
+      expect(second.body).toEqual(first.body);
+
+      const users = await User.find({ email: 'sarahdup@example.com' });
+      expect(users).toHaveLength(1);
+      expect(users[0].name).toBe('Sarah Connor');
     });
 
     it('POST /api/auth/register rejects a missing phone (400 VALIDATION_ERROR)', async () => {
@@ -122,12 +144,15 @@ describe('Encore REST API Integration Tests (§C7.1, §D4.2, ADR-008)', () => {
     });
 
     it('GET /api/users/me returns 200 with profile when valid token provided (FR-5)', async () => {
-      const { token } = await authService.register({
+      await authService.register({
         name: 'Sarah Connor',
         email: 'sarah@example.com',
         password: 'securePassword99',
         phone: '0771234567',
       });
+      // register() no longer issues a JWT (D14) — login is the only token
+      // issuer, and it doesn't require email verification first.
+      const { token } = await authService.login({ email: 'sarah@example.com', password: 'securePassword99' });
 
       const res = await request(app)
         .get('/api/users/me')
@@ -148,13 +173,17 @@ describe('Encore REST API Integration Tests (§C7.1, §D4.2, ADR-008)', () => {
     beforeEach(async () => {
       stripeMock.checkout.sessions.create.mockClear();
 
-      // 1. Create customer user & token
-      const customer = await authService.register({
+      // 1. Create customer user & token. register() no longer issues a JWT
+      // (D14) — log in afterwards to get one; login doesn't require
+      // verification, and nothing in this old Event/Booking flow gates on
+      // emailVerified yet.
+      await authService.register({
         name: 'Customer One',
         email: 'customer@test.com',
         password: 'password123',
         phone: '0771234567',
       });
+      const customer = await authService.login({ email: 'customer@test.com', password: 'password123' });
       customerToken = customer.token;
 
       // 2. Create admin user & token

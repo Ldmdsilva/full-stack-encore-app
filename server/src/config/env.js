@@ -17,6 +17,8 @@ export const env = Object.freeze({
   LOG_LEVEL: process.env.LOG_LEVEL,
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
   HOLD_TTL_MINUTES: Number(process.env.HOLD_TTL_MINUTES) || 10,
+  VERIFY_TOKEN_TTL_HOURS: Number(process.env.VERIFY_TOKEN_TTL_HOURS) || 24,
+  RESET_TOKEN_TTL_MINUTES: Number(process.env.RESET_TOKEN_TTL_MINUTES) || 30,
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,

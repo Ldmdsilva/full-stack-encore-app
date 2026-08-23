@@ -13,6 +13,16 @@ mockStripeModule(stripeMock);
 
 let authService;
 
+// register() no longer returns { user, token } (D14: 202 { message } only,
+// no JWT until login) — these tests exercise getUserProfile/updateUserProfile
+// /deleteUserAccount, not register itself, so this helper registers via the
+// real service (still exercising hashing/validation) and then fetches the
+// resulting User document the normal DB way.
+async function registerUser(authServiceRef, params) {
+  await authServiceRef.register(params);
+  return User.findOne({ email: params.email.toLowerCase().trim() });
+}
+
 describe('services/authService.js — additional coverage (profile, account deletion)', () => {
   beforeAll(async () => {
     await connectTestDB();
@@ -50,7 +60,7 @@ describe('services/authService.js — additional coverage (profile, account dele
 
   describe('getUserProfile', () => {
     it('returns the user profile for a valid id', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'Profile User',
         email: 'profile@test.com',
         password: 'password123',
@@ -71,7 +81,7 @@ describe('services/authService.js — additional coverage (profile, account dele
 
   describe('updateUserProfile', () => {
     it('updates name, email, and phone together', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'Update Me',
         email: 'updateme@test.com',
         password: 'password123',
@@ -91,7 +101,7 @@ describe('services/authService.js — additional coverage (profile, account dele
 
     it('rejects an email already in use by another account with 409 DUPLICATE_EMAIL', async () => {
       await authService.register({ name: 'User A', email: 'usera@test.com', password: 'password123', phone: '0771234567' });
-      const { user: userB } = await authService.register({
+      const userB = await registerUser(authService, {
         name: 'User B',
         email: 'userb@test.com',
         password: 'password123',
@@ -105,7 +115,7 @@ describe('services/authService.js — additional coverage (profile, account dele
     });
 
     it('rejects an invalid phone with 400 VALIDATION_ERROR', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'Phone Guard User',
         email: 'phoneguard@test.com',
         password: 'password123',
@@ -135,7 +145,7 @@ describe('services/authService.js — additional coverage (profile, account dele
     });
 
     it('anonymises the account, refunds confirmed bookings, releases seats, and cancels pending bookings', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'To Delete',
         email: 'todelete@test.com',
         password: 'password123',

@@ -82,15 +82,26 @@ describe('notification/notificationService.js — fire-and-forget guarantees (AD
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
   });
 
-  it('notifyWelcome, notifyBookingCancelled, notifyEventCancelled, and notifyPaymentFailed each fire without throwing', async () => {
-    expect(() => notificationService.notifyWelcome(user)).not.toThrow();
+  it('notifyVerifyEmail and notifyPasswordReset fire an email only, without throwing', async () => {
+    expect(() =>
+      notificationService.notifyVerifyEmail({ user, verifyUrl: 'https://encore.live/verify?token=abc' })
+    ).not.toThrow();
+    expect(() =>
+      notificationService.notifyPasswordReset({ user, resetUrl: 'https://encore.live/reset?token=abc' })
+    ).not.toThrow();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sendEmailMock).toHaveBeenCalledTimes(2);
+    expect(sendSmsMock).not.toHaveBeenCalled();
+  });
+
+  it('notifyBookingCancelled, notifyEventCancelled, and notifyPaymentFailed each fire without throwing', async () => {
     expect(() => notificationService.notifyBookingCancelled({ user, booking: bookingFixture, refunded: true })).not.toThrow();
     expect(() => notificationService.notifyEventCancelled({ user, booking: bookingFixture, event: eventFixture })).not.toThrow();
     expect(() => notificationService.notifyPaymentFailed({ user, booking: bookingFixture })).not.toThrow();
 
     await new Promise((resolve) => setImmediate(resolve));
-    // welcome is email-only; the other three are email + sms
-    expect(sendEmailMock).toHaveBeenCalledTimes(4);
+    expect(sendEmailMock).toHaveBeenCalledTimes(3);
     expect(sendSmsMock).toHaveBeenCalledTimes(3);
   });
 });
