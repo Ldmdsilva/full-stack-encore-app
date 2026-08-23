@@ -5,6 +5,7 @@ import { connectDB, disconnectDB } from './config/db.js';
 import { initSocket } from './config/socket.js';
 import { registerSeatSocketGateway } from './sockets/seatSocketGateway.js';
 import { startHoldReaper, stopHoldReaper } from './jobs/holdReaper.js';
+import { startPaymentReconciler, stopPaymentReconciler } from './jobs/paymentReconciler.js';
 
 const PORT = env.PORT;
 
@@ -22,6 +23,7 @@ async function startServer() {
   const handleShutdown = async (signal) => {
     console.log(`\n[Server] ${signal} signal received. Closing HTTP server and database connections...`);
     stopHoldReaper();
+    stopPaymentReconciler();
     httpServer.close(async () => {
       await disconnectDB();
       console.log('[Server] Graceful shutdown completed.');
@@ -47,6 +49,9 @@ async function startServer() {
 
     // 6. Start the seat-hold reaper (ADR-009)
     startHoldReaper();
+
+    // 7. Start the payment reconciliation job (FR-39, ADR-014)
+    startPaymentReconciler();
   } catch (error) {
     console.error(`[Server] Startup Failed: ${error.message}`);
     process.exit(1);

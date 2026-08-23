@@ -74,7 +74,38 @@ const bookingSchema = new mongoose.Schema(
     eventRef: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Event',
-      required: [true, 'Event reference is required'],
+      required: false,
+    },
+    // New showtime/hold-based flow (ADR-014, additive — legacy Event flow
+    // above is untouched). Exactly one of eventRef/showtimeRef is enforced
+    // by the pre('validate') hook below, not by `required` on either field.
+    showtimeRef: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Showtime',
+    },
+    holdRef: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Hold',
+      unique: true,
+      sparse: true,
+    },
+    // Deliberately separate from the nested `payment.paymentIntentId` used by
+    // the legacy Checkout Session flow — the new flow writes here instead,
+    // with its own independent uniqueness guarantee.
+    paymentIntentId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'succeeded', 'failed', 'refunded'],
+      default: undefined,
+    },
+    // Denormalised from Showtime.screenName so a booking's ticket can show
+    // its screen without populating Cinema.screens.
+    screenName: {
+      type: String,
     },
     seats: {
       type: [bookedSeatSchema],
@@ -119,9 +150,23 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
+// Cross-reference invariant: a booking belongs to exactly one flow — the
+// legacy Event flow (eventRef) or the new Showtime/Hold flow (showtimeRef) —
+// never both, never neither. Enforced structurally here rather than via
+// `required` on either field, since which one is required depends on the
+// other.
+bookingSchema.pre('validate', function crossReferenceGuard() {
+  const hasEventRef = !!this.eventRef;
+  const hasShowtimeRef = !!this.showtimeRef;
+  if (hasEventRef === hasShowtimeRef) {
+    this.invalidate('eventRef', 'Exactly one of eventRef or showtimeRef is required');
+  }
+});
+
 // Indexes (§C6.3)
 bookingSchema.index({ userRef: 1, createdAt: -1 });
 bookingSchema.index({ eventRef: 1 });
+bookingSchema.index({ showtimeRef: 1 });
 bookingSchema.index({ status: 1, holdExpiresAt: 1 });
 
 const Booking = mongoose.model('Booking', bookingSchema);

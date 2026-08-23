@@ -15,6 +15,9 @@ export function serializeBooking(booking) {
     userId: serializeRefId(obj.userRef),
     user: serializePopulatedUser(obj.userRef),
     event: serializePopulatedEvent(obj.eventRef),
+    // Showtime/Hold domain (ADR-014, additive) — parallel to `event` above,
+    // which keeps working identically for legacy Event-based bookings.
+    showtime: serializePopulatedShowtime(obj.showtimeRef),
     seats: (obj.seats || []).map((seat) => ({
       id: seat.id,
       section: seat.section,
@@ -25,6 +28,11 @@ export function serializeBooking(booking) {
     totalPrice: obj.totalPrice,
     status: obj.status,
     holdExpiresAt: obj.holdExpiresAt ?? null,
+    // Top-level, new-flow payment fields (ADR-014) — deliberately separate
+    // from the nested `payment` object below, which stays as-is and is used
+    // only by the legacy Checkout Session flow.
+    paymentIntentId: obj.paymentIntentId ?? null,
+    paymentStatus: obj.paymentStatus ?? null,
     payment: obj.payment
       ? {
           provider: obj.payment.provider,
@@ -65,5 +73,22 @@ function serializePopulatedEvent(eventRef) {
     artist: eventRef.artist,
     date: eventRef.date,
     status: eventRef.status,
+  };
+}
+
+/**
+ * Tolerant of a populated `showtimeRef` doc, a bare ObjectId, or absent —
+ * same degrade-to-null-when-unpopulated pattern as `serializePopulatedEvent`
+ * above. Doesn't require nested Film/Cinema population; only reports what's
+ * actually available on the Showtime document itself.
+ * @param {object} showtimeRef
+ * @returns {object|null}
+ */
+function serializePopulatedShowtime(showtimeRef) {
+  if (!showtimeRef || typeof showtimeRef !== 'object' || !showtimeRef.screenName) return null;
+  return {
+    id: serializeRefId(showtimeRef),
+    screenName: showtimeRef.screenName,
+    startsAt: showtimeRef.startsAt,
   };
 }

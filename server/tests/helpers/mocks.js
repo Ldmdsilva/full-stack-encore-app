@@ -29,7 +29,7 @@ import { jest } from '@jest/globals';
  * actually calls: `checkout.sessions.create`, `checkout.sessions.expire`,
  * `checkout.sessions.retrieve`, `refunds.create`, `webhooks.constructEvent`,
  * `webhooks.generateTestHeaderString`, `paymentIntents.create`,
- * `paymentIntents.cancel`, `paymentIntents.retrieve`.
+ * `paymentIntents.cancel`, `paymentIntents.retrieve`, `paymentIntents.list`.
  * @param {object} [overrides] - deep-merged onto the default mock's leaf functions
  * @returns {object}
  */
@@ -74,6 +74,7 @@ export function createStripeMock(overrides = {}) {
         client_secret: `${id}_secret`,
         status: 'requires_payment_method',
       })),
+      list: jest.fn(async () => ({ data: [] })),
     },
   };
 
@@ -83,7 +84,10 @@ export function createStripeMock(overrides = {}) {
     },
     refunds: { ...base.refunds, ...(overrides.refunds || {}) },
     webhooks: { ...base.webhooks, ...(overrides.webhooks || {}) },
-    paymentIntents: { ...base.paymentIntents, ...(overrides.paymentIntents || {}) },
+    paymentIntents: {
+      ...base.paymentIntents,
+      ...(overrides.paymentIntents || {}),
+    },
   };
 }
 

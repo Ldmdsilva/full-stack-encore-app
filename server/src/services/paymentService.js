@@ -181,6 +181,13 @@ export async function refundPayment(paymentIntentId) {
   return stripe.refunds.create({ payment_intent: paymentIntentId });
 }
 
+// §C7.3 names the adapter method `refund` — a direct alias (zero behaviour
+// change) so a later phase's confirm/reconcile code can call
+// `paymentService.refund(...)` and match the ADR-014 interface naming
+// exactly, without renaming the existing `refundPayment` export other
+// call sites already depend on.
+export const refund = refundPayment;
+
 /**
  * Create a Stripe PaymentIntent for a Hold (ADR-014 / D12 — separate from
  * hold creation itself, so a hold can exist and broadcast in realtime
@@ -211,6 +218,31 @@ export async function createIntent({ holdId, amountMinor, currency }) {
  */
 export async function cancelIntent(paymentIntentId) {
   return stripe.paymentIntents.cancel(paymentIntentId);
+}
+
+/**
+ * Retrieve a PaymentIntent's current state directly from Stripe — the
+ * server-side source of truth a later phase's confirm/reconcile flow uses
+ * instead of trusting a client-supplied status (ADR-014).
+ * @param {string} paymentIntentId
+ * @returns {Promise<import('stripe').Stripe.PaymentIntent>}
+ */
+export async function retrieveIntent(paymentIntentId) {
+  return stripe.paymentIntents.retrieve(paymentIntentId);
+}
+
+/**
+ * List PaymentIntents that succeeded at or after a given time — informational
+ * §C7.3 adapter completeness; the actual reconciliation job (a later phase)
+ * is hold-driven, not list-driven, so this is a smaller-usage utility, e.g.
+ * for admin/ops visibility rather than the reconciler's main loop.
+ * @param {Date|number} sinceDate - a Date or epoch-seconds number
+ * @returns {Promise<import('stripe').Stripe.PaymentIntent[]>}
+ */
+export async function listSucceededSince(sinceDate) {
+  const createdGte = typeof sinceDate === 'number' ? sinceDate : Math.floor(new Date(sinceDate).getTime() / 1000);
+  const result = await stripe.paymentIntents.list({ created: { gte: createdGte }, limit: 100 });
+  return result.data.filter((pi) => pi.status === 'succeeded');
 }
 
 /**

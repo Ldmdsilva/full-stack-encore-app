@@ -10,9 +10,13 @@ import { env } from '../config/env.js';
 
 /**
  * Generate a unique, human-readable booking reference code (e.g., ENC-4471)
+ *
+ * Exported (P5, additive, zero behaviour change) so `confirmService.js`'s
+ * Showtime/Hold-domain `fulfilHold` can reuse the exact same reference
+ * format instead of duplicating this logic.
  * @returns {string}
  */
-function generateBookingReference() {
+export function generateBookingReference() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let randomPart = '';
   for (let i = 0; i < 4; i++) {

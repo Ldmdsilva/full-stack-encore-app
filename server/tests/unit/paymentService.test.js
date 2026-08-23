@@ -378,6 +378,53 @@ describe('services/paymentService.js (Phase 2, ADR-010, ADR-011)', () => {
     });
   });
 
+  describe('retrieveIntent (ADR-014 / §C7.3)', () => {
+    it('retrieves the PaymentIntent by id', async () => {
+      const intent = await paymentService.retrieveIntent('pi_test_retrieve');
+      expect(stripeMock.paymentIntents.retrieve).toHaveBeenCalledWith('pi_test_retrieve');
+      expect(intent.id).toBe('pi_test_retrieve');
+    });
+  });
+
+  describe('listSucceededSince (ADR-014 / §C7.3)', () => {
+    it('lists PaymentIntents created at or after the given Date, filtered to only succeeded ones', async () => {
+      const since = new Date('2026-01-01T00:00:00Z');
+      const expectedGte = Math.floor(since.getTime() / 1000);
+      stripeMock.paymentIntents.list.mockResolvedValueOnce({
+        data: [
+          { id: 'pi_succeeded_1', status: 'succeeded' },
+          { id: 'pi_pending_1', status: 'requires_payment_method' },
+          { id: 'pi_succeeded_2', status: 'succeeded' },
+          { id: 'pi_canceled_1', status: 'canceled' },
+        ],
+      });
+
+      const result = await paymentService.listSucceededSince(since);
+
+      expect(stripeMock.paymentIntents.list).toHaveBeenCalledWith({ created: { gte: expectedGte }, limit: 100 });
+      expect(result).toHaveLength(2);
+      expect(result.map((pi) => pi.id)).toEqual(['pi_succeeded_1', 'pi_succeeded_2']);
+    });
+
+    it('accepts a raw epoch-seconds number instead of a Date', async () => {
+      stripeMock.paymentIntents.list.mockResolvedValueOnce({ data: [{ id: 'pi_x', status: 'succeeded' }] });
+
+      const result = await paymentService.listSucceededSince(1700000000);
+
+      expect(stripeMock.paymentIntents.list).toHaveBeenCalledWith({ created: { gte: 1700000000 }, limit: 100 });
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('refund (alias for refundPayment, §C7.3 naming)', () => {
+    it('is the same function as refundPayment and creates a Stripe refund', async () => {
+      expect(paymentService.refund).toBe(paymentService.refundPayment);
+      const refundResult = await paymentService.refund('pi_test_alias');
+      expect(stripeMock.refunds.create).toHaveBeenCalledWith({ payment_intent: 'pi_test_alias' });
+      expect(refundResult.id).toBe('re_test_mock_refund');
+    });
+  });
+
   describe('verifyWebhookSignature', () => {
     it('delegates to stripe.webhooks.constructEvent', () => {
       stripeMock.webhooks.constructEvent.mockReturnValueOnce({ id: 'evt_1', type: 'checkout.session.completed' });
