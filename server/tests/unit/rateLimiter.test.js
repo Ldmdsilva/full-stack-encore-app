@@ -55,7 +55,7 @@ describe('rateLimiter middleware — Mongo-backed fixed window (ADR-013 Option D
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('rejects with next(AppError) statusCode 429 / code TOO_MANY_REQUESTS once count exceeds the test-env max', async () => {
+  it('rejects with next(AppError) statusCode 429 / code RATE_LIMITED once count exceeds the test-env max', async () => {
     await RateCounter.create({
       key: 'authLimiter:10.0.0.3',
       count: 1000, // already at the NODE_ENV=test ceiling for authLimiter
@@ -71,7 +71,7 @@ describe('rateLimiter middleware — Mongo-backed fixed window (ADR-013 Option D
     const errArg = next.mock.calls[0][0];
     expect(errArg).toBeInstanceOf(AppError);
     expect(errArg.statusCode).toBe(429);
-    expect(errArg.code).toBe('TOO_MANY_REQUESTS');
+    expect(errArg.code).toBe('RATE_LIMITED');
   });
 
   it('applies the higher bookingLimiter ceiling independently (10000), keyed separately from authLimiter', async () => {

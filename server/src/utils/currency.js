@@ -12,7 +12,7 @@ export function formatLkr(amount) {
  * @param {Date} date
  * @returns {string}
  */
-export function formatEventDateTime(date) {
+export function formatShowtimeDateTime(date) {
   const d = new Date(date);
   const datePart = d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
   const timePart = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });

@@ -59,7 +59,7 @@ function createLimiter({ windowMs, max, keyPrefix, message }) {
       }
 
       if (counter.count > max) {
-        return next(new AppError(message, 429, 'TOO_MANY_REQUESTS'));
+        return next(new AppError(message, 429, 'RATE_LIMITED'));
       }
 
       return next();

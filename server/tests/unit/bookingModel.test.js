@@ -4,13 +4,15 @@ import { connectTestDB, clearTestDB, closeTestDB } from '../helpers/db.js';
 import Booking from '../../src/models/Booking.js';
 
 /**
- * Booking model — cross-reference validation and new sparse-unique fields
- * added additively for the showtime/hold-based flow (ADR-014, Phase P5
- * stage 1). The legacy Event-flow shape (eventRef, no showtimeRef) must
- * continue to validate exactly as before — that is the critical regression
- * check here.
+ * Booking model — finalized Showtime/Hold-only schema (ADR-014, §P6).
+ * The legacy Event-flow fields (`eventRef`, the nested `payment` sub-object,
+ * `holdExpiresAt`, and the `pending`/`expired` status values) are gone
+ * entirely: `showtimeRef`, `holdRef`, `paymentIntentId`, and `paymentStatus`
+ * are all required, since nothing produces a Booking any other way any more
+ * (a Booking is only ever created by `confirmService.fulfilHold` after a
+ * verified successful payment).
  */
-describe('models/Booking.js (ADR-014 additive fields)', () => {
+describe('models/Booking.js (finalized Showtime/Hold schema)', () => {
   beforeAll(async () => {
     await connectTestDB();
   });
@@ -27,92 +29,84 @@ describe('models/Booking.js (ADR-014 additive fields)', () => {
     return {
       reference: `ENC-${new mongoose.Types.ObjectId().toString().slice(-6)}`,
       userRef: new mongoose.Types.ObjectId(),
+      showtimeRef: new mongoose.Types.ObjectId(),
+      holdRef: new mongoose.Types.ObjectId(),
+      paymentIntentId: `pi_${new mongoose.Types.ObjectId().toString()}`,
+      paymentStatus: 'succeeded',
       seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
       totalPrice: 50,
       ...overrides,
     };
   }
 
-  describe('exactly-one-of eventRef/showtimeRef invariant', () => {
-    it('validates fine with only eventRef set (legacy shape — regression check)', async () => {
-      const booking = new Booking(baseFields({ eventRef: new mongoose.Types.ObjectId() }));
-      await expect(booking.validate()).resolves.toBeUndefined();
-    });
-
-    it('validates fine with only showtimeRef set (new shape)', async () => {
-      const booking = new Booking(baseFields({ showtimeRef: new mongoose.Types.ObjectId() }));
-      await expect(booking.validate()).resolves.toBeUndefined();
-    });
-
-    it('fails validation when both eventRef and showtimeRef are set', async () => {
-      const booking = new Booking(
-        baseFields({ eventRef: new mongoose.Types.ObjectId(), showtimeRef: new mongoose.Types.ObjectId() })
-      );
-      await expect(booking.validate()).rejects.toThrow(/Exactly one of eventRef or showtimeRef/);
-    });
-
-    it('fails validation when neither eventRef nor showtimeRef is set', async () => {
+  describe('required-field validation', () => {
+    it('validates fine when every required field is present', async () => {
       const booking = new Booking(baseFields());
-      await expect(booking.validate()).rejects.toThrow(/Exactly one of eventRef or showtimeRef/);
+      await expect(booking.validate()).resolves.toBeUndefined();
+    });
+
+    it('fails validation when showtimeRef is missing', async () => {
+      const booking = new Booking(baseFields({ showtimeRef: undefined }));
+      await expect(booking.validate()).rejects.toThrow(/Showtime reference is required/);
+    });
+
+    it('fails validation when holdRef is missing', async () => {
+      const booking = new Booking(baseFields({ holdRef: undefined }));
+      await expect(booking.validate()).rejects.toThrow(/Hold reference is required/);
+    });
+
+    it('fails validation when paymentIntentId is missing', async () => {
+      const booking = new Booking(baseFields({ paymentIntentId: undefined }));
+      await expect(booking.validate()).rejects.toThrow(/Payment intent id is required/);
+    });
+
+    it('fails validation when paymentStatus is missing', async () => {
+      const booking = new Booking(baseFields({ paymentStatus: undefined }));
+      await expect(booking.validate()).rejects.toThrow(/Payment status is required/);
+    });
+
+    it('no longer has an eventRef or a nested payment sub-object', async () => {
+      const booking = new Booking(baseFields());
+      expect(booking.eventRef).toBeUndefined();
+      expect(booking.payment).toBeUndefined();
+      expect(booking.holdExpiresAt).toBeUndefined();
     });
   });
 
-  describe('holdRef sparse-unique index', () => {
-    it('allows two bookings that both omit holdRef to coexist', async () => {
-      await Booking.create(baseFields({ eventRef: new mongoose.Types.ObjectId() }));
-      await expect(
-        Booking.create(baseFields({ eventRef: new mongoose.Types.ObjectId() }))
-      ).resolves.toBeDefined();
-    });
-
+  describe('holdRef uniqueness', () => {
     it('rejects a second booking sharing the same holdRef', async () => {
       const holdRef = new mongoose.Types.ObjectId();
-      await Booking.create(baseFields({ showtimeRef: new mongoose.Types.ObjectId(), holdRef }));
-      await expect(
-        Booking.create(baseFields({ showtimeRef: new mongoose.Types.ObjectId(), holdRef }))
-      ).rejects.toMatchObject({ code: 11000 });
+      await Booking.create(baseFields({ holdRef }));
+      await expect(Booking.create(baseFields({ holdRef }))).rejects.toMatchObject({ code: 11000 });
     });
   });
 
-  describe('paymentIntentId (top-level) sparse-unique index', () => {
-    it('allows two bookings that both omit the top-level paymentIntentId to coexist', async () => {
-      await Booking.create(baseFields({ eventRef: new mongoose.Types.ObjectId() }));
-      await expect(
-        Booking.create(baseFields({ eventRef: new mongoose.Types.ObjectId() }))
-      ).resolves.toBeDefined();
-    });
-
-    it('rejects a second booking sharing the same top-level paymentIntentId', async () => {
-      await Booking.create(
-        baseFields({ showtimeRef: new mongoose.Types.ObjectId(), paymentIntentId: 'pi_shared_1' })
-      );
-      await expect(
-        Booking.create(baseFields({ showtimeRef: new mongoose.Types.ObjectId(), paymentIntentId: 'pi_shared_1' }))
-      ).rejects.toMatchObject({ code: 11000 });
-    });
-
-    it('does not collide with the legacy nested payment.paymentIntentId field', async () => {
-      await Booking.create(
-        baseFields({
-          eventRef: new mongoose.Types.ObjectId(),
-          payment: { provider: 'stripe', paymentIntentId: 'pi_legacy_nested' },
-        })
-      );
-      await expect(
-        Booking.create(
-          baseFields({
-            eventRef: new mongoose.Types.ObjectId(),
-            payment: { provider: 'stripe', paymentIntentId: 'pi_legacy_nested' },
-          })
-        )
-      ).resolves.toBeDefined();
+  describe('paymentIntentId uniqueness', () => {
+    it('rejects a second booking sharing the same paymentIntentId', async () => {
+      await Booking.create(baseFields({ paymentIntentId: 'pi_shared_1' }));
+      await expect(Booking.create(baseFields({ paymentIntentId: 'pi_shared_1' }))).rejects.toMatchObject({
+        code: 11000,
+      });
     });
   });
 
-  describe('paymentStatus default', () => {
-    it('is left undefined/absent on a legacy-shaped booking rather than defaulting', async () => {
-      const booking = await Booking.create(baseFields({ eventRef: new mongoose.Types.ObjectId() }));
-      expect(booking.paymentStatus).toBeUndefined();
+  describe('status enum', () => {
+    it('defaults to confirmed when omitted', async () => {
+      const booking = await Booking.create(baseFields());
+      expect(booking.status).toBe('confirmed');
+    });
+
+    it('accepts cancelled', async () => {
+      const booking = await Booking.create(baseFields({ status: 'cancelled' }));
+      expect(booking.status).toBe('cancelled');
+    });
+
+    it('rejects a legacy pending/expired status — those values no longer exist on this model', async () => {
+      const pending = new Booking(baseFields({ status: 'pending' }));
+      await expect(pending.validate()).rejects.toThrow();
+
+      const expired = new Booking(baseFields({ status: 'expired' }));
+      await expect(expired.validate()).rejects.toThrow();
     });
   });
 });

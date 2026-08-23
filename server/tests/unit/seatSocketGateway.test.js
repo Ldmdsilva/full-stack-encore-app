@@ -2,8 +2,6 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { setIO } from '../../src/config/socket.js';
 import {
   registerSeatSocketGateway,
-  broadcastSeatUpdate,
-  broadcastEventCancelled,
   broadcastBookingUpdated,
   broadcastShowtimeSeatsUpdated,
   broadcastShowtimeCancelled,
@@ -70,44 +68,6 @@ describe('sockets/seatSocketGateway.js', () => {
       expect(socket.joinedRooms).toEqual([]);
     });
 
-    it('join:event joins the event room (legacy — must keep working)', () => {
-      let connectionHandler;
-      const io = { on: (event, handler) => { connectionHandler = handler; } };
-      registerSeatSocketGateway(io);
-
-      const socket = createFakeSocket();
-      connectionHandler(socket);
-      socket.trigger('join:event', { eventId: 'evt-1' });
-
-      expect(socket.joinedRooms).toContain('event:evt-1');
-    });
-
-    it('join:event without an eventId emits an INVALID_SUBSCRIPTION error', () => {
-      let connectionHandler;
-      const io = { on: (event, handler) => { connectionHandler = handler; } };
-      registerSeatSocketGateway(io);
-
-      const socket = createFakeSocket();
-      connectionHandler(socket);
-      socket.trigger('join:event', {});
-
-      expect(socket.emitted).toEqual([
-        { event: 'error', payload: { code: 'INVALID_SUBSCRIPTION', message: 'eventId is required to join an event room' } },
-      ]);
-    });
-
-    it('leave:event leaves the event room', () => {
-      let connectionHandler;
-      const io = { on: (event, handler) => { connectionHandler = handler; } };
-      registerSeatSocketGateway(io);
-
-      const socket = createFakeSocket();
-      connectionHandler(socket);
-      socket.trigger('leave:event', { eventId: 'evt-1' });
-
-      expect(socket.leftRooms).toContain('event:evt-1');
-    });
-
     it('join:showtime joins the showtime room', () => {
       let connectionHandler;
       const io = { on: (event, handler) => { connectionHandler = handler; } };
@@ -165,24 +125,6 @@ describe('sockets/seatSocketGateway.js', () => {
     beforeEach(() => {
       fakeIO = createFakeIO();
       setIO(fakeIO);
-    });
-
-    it('broadcastSeatUpdate emits seats:updated to the event room (legacy — must keep working)', () => {
-      broadcastSeatUpdate('evt-1', ['A-1', 'A-2'], 'held');
-
-      expect(fakeIO.to).toHaveBeenCalledWith('event:evt-1');
-      expect(fakeIO.emit).toHaveBeenCalledWith('seats:updated', {
-        eventId: 'evt-1',
-        seatIds: ['A-1', 'A-2'],
-        status: 'held',
-      });
-    });
-
-    it('broadcastEventCancelled emits event:cancelled to the event room (legacy — must keep working)', () => {
-      broadcastEventCancelled('evt-1');
-
-      expect(fakeIO.to).toHaveBeenCalledWith('event:evt-1');
-      expect(fakeIO.emit).toHaveBeenCalledWith('event:cancelled', { eventId: 'evt-1' });
     });
 
     it('broadcastShowtimeSeatsUpdated emits seats:updated to the showtime room', () => {

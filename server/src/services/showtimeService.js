@@ -29,11 +29,14 @@ const SECTION_TO_TIER = {
  * warning log for an unrecognised section name) and a frozen price
  * (`tierPrice(basePrice, tier)`) — computed once here, never recomputed
  * later even if `basePrice` changes (§C6.2, D8).
+ * Exported so `scripts/seed.js` can build believable showtime seat data
+ * from a cinema screen's `seatLayout` without duplicating the
+ * `SECTION_TO_TIER`/pricing logic.
  * @param {object} screen
  * @param {number} basePrice
  * @returns {Array}
  */
-function deriveSeatsFromScreen(screen, basePrice) {
+export function deriveSeatsFromScreen(screen, basePrice) {
   return screen.seatLayout.map((layoutSeat) => {
     const tier = SECTION_TO_TIER[layoutSeat.section?.toLowerCase()];
     const resolvedTier = tier || 'STANDARD';
@@ -193,10 +196,9 @@ export async function createShowtime({ filmRef, cinemaRef, screenId, startsAt, b
 
 /**
  * Cancel a showtime (FR-24). Only flips the status flag — booking
- * cancellation/refund cascading is intentionally deferred to a much later
- * phase, once `Booking` is reworked to reference `showtimeRef` instead of
- * the legacy `eventRef` (mirrors `eventService.deleteEvent`'s cascade, but
- * that cascade doesn't belong here yet).
+ * cancellation/refund cascading for already-confirmed bookings on this
+ * showtime is intentionally out of scope here; see `bookingService.
+ * cancelBooking` for the per-booking cascade.
  * @param {string} id
  * @returns {Promise<object>}
  */

@@ -3,14 +3,14 @@ import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
 import User from '../models/User.js';
 import Booking from '../models/Booking.js';
-import Event from '../models/Event.js';
+import Showtime from '../models/Showtime.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { normaliseLk } from '../utils/phone.js';
 import * as tokenService from './tokenService.js';
 import * as tokenDenylistService from './tokenDenylistService.js';
 import { notifyVerifyEmail, notifyPasswordReset } from './notification/notificationService.js';
 import { refundPayment } from './paymentService.js';
-import { broadcastSeatUpdate } from '../sockets/seatSocketGateway.js';
+import { broadcastShowtimeSeatsUpdated } from '../sockets/seatSocketGateway.js';
 import { logger } from '../config/logger.js';
 import { env } from '../config/env.js';
 
@@ -321,28 +321,26 @@ export async function deleteUserAccount(userId) {
     throw new AppError('User not found', 404, 'USER_NOT_FOUND');
   }
 
-  const activeBookings = await Booking.find({ userRef: userId, status: { $in: ['pending', 'confirmed'] } });
+  const activeBookings = await Booking.find({ userRef: userId, status: 'confirmed' });
 
   for (const booking of activeBookings) {
-    if (booking.status === 'confirmed' && booking.payment?.paymentIntentId) {
+    if (booking.paymentIntentId) {
       try {
-        const refund = await refundPayment(booking.payment.paymentIntentId);
-        booking.payment.refundId = refund.id;
+        await refundPayment(booking.paymentIntentId);
       } catch (error) {
         logger.error({ err: error, reference: booking.reference }, '[AuthService] Refund failed during account deletion');
       }
     }
 
     const seatIds = booking.seats.map((seat) => seat.id);
-    await Event.updateOne(
-      { _id: booking.eventRef },
+    await Showtime.updateOne(
+      { _id: booking.showtimeRef },
       { $set: { 'seats.$[elem].status': 'available' } },
       { arrayFilters: [{ 'elem.id': { $in: seatIds } }] }
     );
-    broadcastSeatUpdate(booking.eventRef.toString(), seatIds, 'available');
+    broadcastShowtimeSeatsUpdated(booking.showtimeRef.toString(), seatIds, 'available');
 
     booking.status = 'cancelled';
-    booking.holdExpiresAt = undefined;
     await booking.save();
   }
 

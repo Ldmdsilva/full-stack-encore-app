@@ -5,14 +5,7 @@ import { verifyEmailTemplate } from '../../templates/email/verifyEmail.js';
 import { passwordResetTemplate } from '../../templates/email/passwordReset.js';
 import { bookingConfirmedTemplate } from '../../templates/email/bookingConfirmed.js';
 import { bookingCancelledTemplate } from '../../templates/email/bookingCancelled.js';
-import { eventCancelledTemplate } from '../../templates/email/eventCancelled.js';
-import { paymentFailedTemplate } from '../../templates/email/paymentFailed.js';
-import {
-  bookingConfirmedSms,
-  bookingCancelledSms,
-  eventCancelledSms,
-  paymentFailedSms,
-} from '../../templates/sms.js';
+import { bookingConfirmedSms, bookingCancelledSms } from '../../templates/sms.js';
 
 /**
  * Notifications are called *after* the triggering database write commits,
@@ -60,25 +53,5 @@ export function notifyBookingCancelled({ user, booking, refunded }) {
   });
   safely('booking-cancelled sms', async () => {
     await sendSms(user.phone, bookingCancelledSms({ booking }));
-  });
-}
-
-export function notifyEventCancelled({ user, booking, event }) {
-  safely('event-cancelled email', async () => {
-    const { subject, html, text } = eventCancelledTemplate({ event, booking });
-    await sendEmail({ to: user.email, subject, html, text });
-  });
-  safely('event-cancelled sms', async () => {
-    await sendSms(user.phone, eventCancelledSms({ event, booking }));
-  });
-}
-
-export function notifyPaymentFailed({ user, booking }) {
-  safely('payment-failed email', async () => {
-    const { subject, html, text } = paymentFailedTemplate({ booking });
-    await sendEmail({ to: user.email, subject, html, text });
-  });
-  safely('payment-failed sms', async () => {
-    await sendSms(user.phone, paymentFailedSms({ booking }));
   });
 }

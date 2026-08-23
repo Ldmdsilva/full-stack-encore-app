@@ -2,21 +2,6 @@ import * as bookingService from '../services/bookingService.js';
 import * as confirmService from '../services/confirmService.js';
 import { serializeBooking } from '../serializers/bookingSerializer.js';
 
-export async function createBooking(req, res, next) {
-  try {
-    const { eventId, seatIds } = req.body;
-    const { booking, clientSecret } = await bookingService.createBooking({
-      userId: req.user.id,
-      customerEmail: req.user.email,
-      eventId,
-      seatIds,
-    });
-    return res.status(201).json({ booking: serializeBooking(booking), clientSecret });
-  } catch (error) {
-    next(error);
-  }
-}
-
 export async function getBookingById(req, res, next) {
   try {
     const booking = await bookingService.getBookingById({
@@ -52,8 +37,7 @@ export async function getMyBookings(req, res, next) {
   }
 }
 
-// Showtime/Hold domain (ADR-014, §C7.1) — additive, alongside the legacy
-// Event/Booking controller functions above, which are untouched.
+// Showtime/Hold domain (ADR-014, §C7.1)
 
 export async function confirmBooking(req, res, next) {
   try {

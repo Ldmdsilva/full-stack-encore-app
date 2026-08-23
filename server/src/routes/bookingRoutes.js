@@ -1,16 +1,13 @@
 import { Router } from 'express';
 import * as bookingController from '../controllers/bookingController.js';
-import * as paymentController from '../controllers/paymentController.js';
 import { verifyToken } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roleGuard.js';
 import { validate } from '../middleware/validate.js';
-import { bookingLimiter } from '../middleware/rateLimiter.js';
-import { createBookingSchema, confirmBookingSchema } from '../validators/bookingValidators.js';
+import { confirmBookingSchema } from '../validators/bookingValidators.js';
 
 const router = Router();
 
 // Customer bookings (FR-17, FR-18, FR-19)
-router.post('/', verifyToken, bookingLimiter, validate(createBookingSchema), bookingController.createBooking);
 router.get('/me', verifyToken, bookingController.getMyBookings);
 
 // Showtime/Hold domain (ADR-014, additive, §C7.1). These MUST be registered
@@ -21,8 +18,6 @@ router.post('/confirm', verifyToken, validate(confirmBookingSchema), bookingCont
 router.get('/by-hold/:holdId', verifyToken, bookingController.getBookingByHold);
 
 router.get('/:id', verifyToken, bookingController.getBookingById);
-router.post('/:id/payment-session', verifyToken, paymentController.createPaymentSession);
-router.post('/:id/confirm-payment', verifyToken, paymentController.confirmPayment);
 router.patch('/:id/cancel', verifyToken, bookingController.cancelBooking);
 
 // Admin-only booking management (FR-24, FR-25)
