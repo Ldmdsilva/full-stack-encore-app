@@ -23,7 +23,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return result;
 }
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const serverEnv = parseEnvFile(path.join(REPO_ROOT, 'server', '.env'));
 const clientEnv = parseEnvFile(path.join(REPO_ROOT, 'client', '.env'));
 

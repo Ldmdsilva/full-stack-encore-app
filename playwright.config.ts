@@ -1,14 +1,13 @@
 import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
-const REPO_ROOT = path.resolve(__dirname, '..');
+const REPO_ROOT = __dirname;
 
 /**
- * System / E2E config (Phase 7, SRS §D4.4). Lives under QA/ at the repo
- * root — see `.github/workflows/ci.yml`'s `e2e` job, which runs
- * `npx playwright test --config=QA/playwright.config.ts` from the repo
- * root on `workflow_dispatch` only (§D7: on demand / at milestones,
- * never on every push).
+ * System / E2E config (Phase 7, SRS §D4.4). Lives at the repo root — see
+ * `.github/workflows/ci.yml`'s `e2e` job, which runs `npx playwright test`
+ * from the repo root on `workflow_dispatch` only (§D7: on demand / at
+ * milestones, never on every push).
  *
  * Prerequisites this config assumes are already in place (it does not set
  * them up itself):
