@@ -182,6 +182,38 @@ export async function refundPayment(paymentIntentId) {
 }
 
 /**
+ * Create a Stripe PaymentIntent for a Hold (ADR-014 / D12 — separate from
+ * hold creation itself, so a hold can exist and broadcast in realtime
+ * without ever touching Stripe, letting non-payment e2e tests run without
+ * Stripe keys).
+ * @param {{ holdId: string, amountMinor: number, currency: string }} params
+ * @returns {Promise<import('stripe').Stripe.PaymentIntent>}
+ */
+export async function createIntent({ holdId, amountMinor, currency }) {
+  return stripe.paymentIntents.create(
+    {
+      amount: amountMinor,
+      currency,
+      metadata: { holdId },
+      automatic_payment_methods: { enabled: true },
+    },
+    { idempotencyKey: holdId }
+  );
+}
+
+/**
+ * Cancel a Stripe PaymentIntent (used when a hold is released before
+ * payment completes, so a released hold never leaves a payable intent
+ * behind). Safe to call on an intent that's already in a terminal state —
+ * Stripe's own idempotent-cancel semantics mean this rarely throws, but a
+ * caller should still tolerate a failure here without blocking hold release.
+ * @param {string} paymentIntentId
+ */
+export async function cancelIntent(paymentIntentId) {
+  return stripe.paymentIntents.cancel(paymentIntentId);
+}
+
+/**
  * Verify and parse an incoming Stripe webhook payload (ADR-011) against its
  * `stripe-signature` header, so a forged request can't confirm/expire a
  * booking on our behalf.

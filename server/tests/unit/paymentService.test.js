@@ -349,6 +349,35 @@ describe('services/paymentService.js (Phase 2, ADR-010, ADR-011)', () => {
     });
   });
 
+  describe('createIntent (ADR-014 / D12)', () => {
+    it('creates a PaymentIntent with the amount/currency/metadata.holdId and an idempotency key equal to the holdId', async () => {
+      const intent = await paymentService.createIntent({
+        holdId: 'hold_test_1',
+        amountMinor: 650000,
+        currency: 'lkr',
+      });
+
+      expect(stripeMock.paymentIntents.create).toHaveBeenCalledTimes(1);
+      const [payload, options] = stripeMock.paymentIntents.create.mock.calls[0];
+
+      expect(payload.amount).toBe(650000);
+      expect(payload.currency).toBe('lkr');
+      expect(payload.metadata).toEqual({ holdId: 'hold_test_1' });
+      expect(payload.automatic_payment_methods).toEqual({ enabled: true });
+      expect(options).toEqual({ idempotencyKey: 'hold_test_1' });
+      expect(intent.id).toBe('pi_test_mock_intent');
+    });
+  });
+
+  describe('cancelIntent', () => {
+    it('cancels the PaymentIntent by id', async () => {
+      const result = await paymentService.cancelIntent('pi_test_456');
+      expect(stripeMock.paymentIntents.cancel).toHaveBeenCalledWith('pi_test_456');
+      expect(result.id).toBe('pi_test_456');
+      expect(result.status).toBe('canceled');
+    });
+  });
+
   describe('verifyWebhookSignature', () => {
     it('delegates to stripe.webhooks.constructEvent', () => {
       stripeMock.webhooks.constructEvent.mockReturnValueOnce({ id: 'evt_1', type: 'checkout.session.completed' });

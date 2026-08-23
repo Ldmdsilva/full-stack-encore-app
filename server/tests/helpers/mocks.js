@@ -28,7 +28,8 @@ import { jest } from '@jest/globals';
  * Build a fake Stripe client covering the surface `paymentService.js`
  * actually calls: `checkout.sessions.create`, `checkout.sessions.expire`,
  * `checkout.sessions.retrieve`, `refunds.create`, `webhooks.constructEvent`,
- * `webhooks.generateTestHeaderString`.
+ * `webhooks.generateTestHeaderString`, `paymentIntents.create`,
+ * `paymentIntents.cancel`, `paymentIntents.retrieve`.
  * @param {object} [overrides] - deep-merged onto the default mock's leaf functions
  * @returns {object}
  */
@@ -61,6 +62,19 @@ export function createStripeMock(overrides = {}) {
       constructEvent: jest.fn(),
       generateTestHeaderString: jest.fn(() => 't=1,v1=mock_signature'),
     },
+    paymentIntents: {
+      create: jest.fn(async () => ({
+        id: 'pi_test_mock_intent',
+        client_secret: 'pi_test_mock_intent_secret',
+        status: 'requires_payment_method',
+      })),
+      cancel: jest.fn(async (id) => ({ id, status: 'canceled' })),
+      retrieve: jest.fn(async (id) => ({
+        id,
+        client_secret: `${id}_secret`,
+        status: 'requires_payment_method',
+      })),
+    },
   };
 
   return {
@@ -69,6 +83,7 @@ export function createStripeMock(overrides = {}) {
     },
     refunds: { ...base.refunds, ...(overrides.refunds || {}) },
     webhooks: { ...base.webhooks, ...(overrides.webhooks || {}) },
+    paymentIntents: { ...base.paymentIntents, ...(overrides.paymentIntents || {}) },
   };
 }
 

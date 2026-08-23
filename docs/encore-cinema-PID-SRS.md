@@ -1585,7 +1585,7 @@ Namespace `/`. Handshake carries the JWT; unauthenticated sockets may join read-
 | Client → Server | `join:showtime` | `{showtimeId}` | Subscribe to seat updates; joins room `showtime:<showtimeId>` |
 | Client → Server | `leave:showtime` | `{showtimeId}` | Unsubscribe on navigation |
 | Server → Client | `seats:updated` | `{showtimeId, seatIds[], status}` | Broadcast to `showtime:<id>` on hold, release, booking, or cancellation |
-| Server → Client | `booking:confirmed` | `{holdId, bookingId, reference}` | Emitted to `showtime:<id>` when reconciliation completes a booking whose confirm call never arrived (ADR-014); the client resolves a reconciling `?hold=` confirmation against this event |
+| Server → Client | `booking:confirmed` | `{holdId, bookingId, reference}` | Emitted to `user:<id>` when reconciliation completes a booking whose confirm call never arrived (ADR-014); the client resolves a reconciling `?hold=` confirmation against this event |
 | Server → Client | `booking:updated` | `{bookingId, status, paymentStatus}` | **New (this amendment).** Emitted to `user:<id>` when a booking's status or payment status changes outside the original confirm flow — cancellation, refund, or an admin-triggered update |
 | Server → Client | `showtime:cancelled` | `{showtimeId}` | Admin cancelled the showtime; broadcast to `showtime:<id>` |
 | Server → Client | `error` | `{code, message}` | Malformed subscription or auth failure |
