@@ -23,7 +23,7 @@ const seatSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['available', 'booked'],
+      enum: ['available', 'held', 'booked'],
       default: 'available',
     },
     price: {
@@ -45,6 +45,19 @@ const eventSchema = new mongoose.Schema(
     artist: {
       type: String,
       required: [true, 'Artist name is required'],
+      trim: true,
+    },
+    genre: {
+      type: String,
+      required: [true, 'Genre is required'],
+      trim: true,
+    },
+    imageUrl: {
+      type: String,
+      trim: true,
+    },
+    description: {
+      type: String,
       trim: true,
     },
     date: {

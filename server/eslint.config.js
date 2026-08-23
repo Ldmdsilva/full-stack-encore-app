@@ -16,6 +16,9 @@ export default [
         clearInterval: 'readonly',
         setImmediate: 'readonly',
         clearImmediate: 'readonly',
+        fetch: 'readonly',
+        URLSearchParams: 'readonly',
+        global: 'writable',
       },
     },
     rules: {

@@ -1,30 +1,66 @@
 import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TicketStub } from '@/components/TicketStub'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/toast'
-import { useStore } from '@/lib/store'
+import { useAsync } from '@/hooks/useAsync'
+import * as bookingsApi from '@/lib/api/bookings'
+import { parseApiError } from '@/lib/api/errors'
 import { formatEventDate, formatPrice, formatStubDate } from '@/lib/formatters'
+import type { Booking, BookingStatus } from '@/lib/types'
+
+const PAGE_SIZE = 10
+
+const STATUS_LABEL: Record<BookingStatus, string> = {
+  confirmed: 'Confirmed',
+  pending: 'Awaiting payment',
+  cancelled: 'Cancelled',
+  expired: 'Expired',
+}
+
+const STATUS_VARIANT: Record<BookingStatus, 'confirmed' | 'pending' | 'cancelled' | 'expired'> = {
+  confirmed: 'confirmed',
+  pending: 'pending',
+  cancelled: 'cancelled',
+  expired: 'expired',
+}
 
 export function MyBookingsPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { user, bookings, cancelBooking } = useStore()
-  const [confirming, setConfirming] = React.useState<string | null>(null)
+  const [page, setPage] = React.useState(1)
+  const [cancelTarget, setCancelTarget] = React.useState<Booking | null>(null)
+  const [cancelling, setCancelling] = React.useState(false)
 
-  if (!user) {
-    return (
-      <div className="mx-auto max-w-2xl px-5 py-24 text-center">
-        <h1 className="font-voice text-[32px] font-medium">Sign in to see your tickets</h1>
-        <p className="mt-2 text-text-secondary">
-          Your bookings live in your account.
-        </p>
-        <Button className="mt-6" onClick={() => navigate('/login')}>
-          Sign in
-        </Button>
-      </div>
-    )
+  const { status, data, error, retry } = useAsync(
+    () => bookingsApi.listMine({ page, limit: PAGE_SIZE }),
+    [page],
+    { isEmpty: (d) => d.bookings.length === 0 },
+  )
+
+  const closeModal = () => {
+    if (cancelling) return
+    setCancelTarget(null)
+  }
+
+  const confirmCancel = async () => {
+    if (!cancelTarget) return
+    setCancelling(true)
+    try {
+      await bookingsApi.cancel(cancelTarget.id)
+      toast('Booking cancelled.', 'success')
+      setCancelTarget(null)
+      retry()
+    } catch (err) {
+      toast(parseApiError(err).message, 'error')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   return (
@@ -34,7 +70,13 @@ export function MyBookingsPage() {
         Every stub you've booked, newest first.
       </p>
 
-      {bookings.length === 0 ? (
+      {status === 'loading' && <Spinner label="Loading your tickets…" className="mt-10" />}
+
+      {status === 'error' && (
+        <ErrorState description={error.message} onRetry={retry} className="mt-10" />
+      )}
+
+      {status === 'empty' && (
         <div className="mt-10 rounded-[var(--radius-card)] border-[0.5px] border-dashed border-border-strong px-6 py-16 text-center">
           <h2 className="font-voice text-[24px] font-medium">
             You haven't booked any concerts yet
@@ -46,63 +88,91 @@ export function MyBookingsPage() {
             Browse concerts
           </Button>
         </div>
-      ) : (
-        <ul className="mt-8 flex flex-col gap-5">
-          {bookings.map((b) => (
-            <li key={b.id}>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-[13px] text-text-muted">
-                  {formatEventDate(b.event.date)} · {b.seats.length}{' '}
-                  {b.seats.length === 1 ? 'seat' : 'seats'} ·{' '}
-                  {formatPrice(b.totalPrice)}
-                </p>
-                <Badge variant={b.status === 'confirmed' ? 'confirmed' : 'cancelled'}>
-                  {b.status === 'confirmed' ? 'Confirmed' : 'Cancelled'}
-                </Badge>
-              </div>
-              <TicketStub
-                variant="compact"
-                eyebrow={formatStubDate(b.event.date)}
-                title={b.event.artist}
-                subtitle={`${b.event.venue.name} · ${b.event.venue.city}`}
-                serial={b.reference}
-                onClick={() => navigate(`/confirmation/${b.id}`)}
-              />
-              {b.status === 'confirmed' && (
-                <div className="mt-2 flex justify-end">
-                  {confirming === b.id ? (
-                    <div className="flex items-center gap-3 text-[13px]">
-                      <span className="text-text-secondary">Cancel this booking?</span>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => {
-                          cancelBooking(b.id)
-                          setConfirming(null)
-                          toast('Booking cancelled.', 'success')
-                        }}
-                      >
-                        Yes, cancel
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
-                        Keep it
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setConfirming(b.id)}
-                    >
+      )}
+
+      {status === 'success' && (
+        <>
+          <ul className="mt-8 flex flex-col gap-5">
+            {data.bookings.map((b) => (
+              <li key={b.id}>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-[13px] text-text-muted">
+                    {b.event ? formatEventDate(b.event.date) : 'Event unavailable'} · {b.seats.length}{' '}
+                    {b.seats.length === 1 ? 'seat' : 'seats'} ·{' '}
+                    {formatPrice(b.totalPrice)}
+                  </p>
+                  <Badge variant={STATUS_VARIANT[b.status]}>{STATUS_LABEL[b.status]}</Badge>
+                </div>
+                <TicketStub
+                  variant="compact"
+                  eyebrow={b.event ? formatStubDate(b.event.date) : ''}
+                  title={b.event?.artist ?? 'Event'}
+                  subtitle={b.event?.title ?? ''}
+                  serial={b.reference}
+                  onClick={() => navigate(`/confirmation/${b.id}`)}
+                />
+                {(b.status === 'confirmed' || b.status === 'pending') && (
+                  <div className="mt-2 flex justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => setCancelTarget(b)}>
                       Cancel booking
                     </Button>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {data.totalPages > 1 && (
+            <div className="mt-10 flex items-center justify-center gap-4">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={data.page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                <ChevronLeft className="size-4" />
+                Previous
+              </Button>
+              <span className="font-mono text-[13px] text-text-muted">
+                Page {data.page} of {data.totalPages}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={data.page >= data.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          )}
+        </>
       )}
+
+      <Modal
+        open={cancelTarget !== null}
+        onClose={closeModal}
+        title="Cancel this booking?"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={closeModal} disabled={cancelling}>
+              Keep it
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmCancel} isLoading={cancelling}>
+              Yes, cancel
+            </Button>
+          </>
+        }
+      >
+        {cancelTarget && (
+          <p>
+            Booking <span className="font-mono text-foreground">{cancelTarget.reference}</span> for{' '}
+            {formatPrice(cancelTarget.totalPrice)} will be cancelled
+            {cancelTarget.status === 'confirmed' ? ' and refunded' : ''}. This cannot be undone.
+          </p>
+        )}
+      </Modal>
     </div>
   )
 }

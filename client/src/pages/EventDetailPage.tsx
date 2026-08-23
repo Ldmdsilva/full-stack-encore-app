@@ -3,63 +3,33 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Radio, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SeatMap } from '@/components/seats/SeatMap'
-import { useToast } from '@/components/ui/toast'
-import { useStore } from '@/lib/store'
-import { getEvent } from '@/lib/mockData'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { useAuth } from '@/context/AuthContext'
+import { useEventSeats, MAX_SEATS } from '@/hooks/useEventSeats'
 import { formatEventDate, formatPrice, formatStubDate } from '@/lib/formatters'
-import type { Seat } from '@/lib/types'
-
-const MAX_SEATS = 8
 
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { toast } = useToast()
-  const { user } = useStore()
-
-  const event = React.useMemo(() => (id ? getEvent(id) : undefined), [id])
-  const [seats, setSeats] = React.useState<Seat[]>(event?.seats ?? [])
-  const [selectedIds, setSelectedIds] = React.useState<string[]>([])
-  const [live, setLive] = React.useState(false)
+  const { user } = useAuth()
   const [liveMessage, setLiveMessage] = React.useState('')
 
-  // Simulate the Socket.IO connection + other clients booking seats.
-  React.useEffect(() => {
-    if (!event) return
-    const connect = setTimeout(() => setLive(true), 700)
-    const feed = setInterval(() => {
-      setSeats((prev) => {
-        const open = prev.filter((s) => s.status === 'available')
-        if (open.length <= 6) return prev
-        const victim = open[Math.floor(Math.random() * open.length)]
-        // Drop it from selection if a remote client just took it (SRS FR-14).
-        setSelectedIds((sel) => {
-          if (sel.includes(victim.id)) {
-            toast('A seat you selected was just taken.', 'error')
-            return sel.filter((x) => x !== victim.id)
-          }
-          return sel
-        })
-        setLiveMessage(`Seat ${victim.id} is now unavailable`)
-        return prev.map((s) =>
-          s.id === victim.id ? { ...s, status: 'booked' } : s,
-        )
-      })
-    }, 4500)
-    return () => {
-      clearTimeout(connect)
-      clearInterval(feed)
-    }
-  }, [event, toast])
+  const { event, seats, selectedIds, status, error, isConnected, toggleSeat, retry } = useEventSeats(id)
 
-  if (!event) {
+  if (status === 'loading') {
+    return <Spinner label="Loading event…" className="py-32" />
+  }
+
+  if (status === 'error' || !event) {
     return (
       <div className="mx-auto max-w-6xl px-5 py-24 text-center">
-        <h1 className="font-voice text-[32px] font-medium">Concert not found</h1>
-        <p className="mt-2 text-text-secondary">
-          This show may have finished or the link is wrong.
-        </p>
-        <Button className="mt-6" onClick={() => navigate('/events')}>
+        <ErrorState
+          title="Concert not found"
+          description={error?.message ?? 'This show may have finished or the link is wrong.'}
+          onRetry={id ? retry : undefined}
+        />
+        <Button className="mt-2" onClick={() => navigate('/events')}>
           Browse concerts
         </Button>
       </div>
@@ -68,19 +38,9 @@ export function EventDetailPage() {
 
   const toggle = (seatId: string) => {
     const seat = seats.find((s) => s.id === seatId)
-    if (!seat || seat.status !== 'available') return
-    setSelectedIds((prev) => {
-      if (prev.includes(seatId)) {
-        setLiveMessage(`Seat ${seatId} removed`)
-        return prev.filter((x) => x !== seatId)
-      }
-      if (prev.length >= MAX_SEATS) {
-        toast(`You can select up to ${MAX_SEATS} seats.`, 'info')
-        return prev
-      }
-      setLiveMessage(`Seat ${seatId} selected`)
-      return [...prev, seatId]
-    })
+    const wasSelected = selectedIds.includes(seatId)
+    toggleSeat(seatId)
+    if (seat) setLiveMessage(wasSelected ? `Seat ${seatId} removed` : `Seat ${seatId} selected`)
   }
 
   const selectedSeats = seats.filter((s) => selectedIds.includes(s.id))
@@ -149,10 +109,10 @@ export function EventDetailPage() {
             </dt>
             <dd className="mt-1 flex items-center gap-1.5 text-[13px]">
               <Radio
-                className={live ? 'size-3.5 text-stage-green' : 'size-3.5 text-ash'}
+                className={isConnected ? 'size-3.5 text-stage-green' : 'size-3.5 text-ash'}
               />
-              <span className={live ? 'text-stage-green' : 'text-ash'}>
-                {live ? 'Live' : 'Connecting…'}
+              <span className={isConnected ? 'text-stage-green' : 'text-ash'}>
+                {isConnected ? 'Live' : 'Connecting…'}
               </span>
             </dd>
           </div>

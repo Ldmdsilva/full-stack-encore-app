@@ -1,5 +1,63 @@
 import mongoose from 'mongoose';
 
+const bookedSeatSchema = new mongoose.Schema(
+  {
+    id: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    section: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    row: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    number: {
+      type: Number,
+      required: true,
+    },
+    price: {
+      type: Number,
+      required: true,
+      min: [0, 'Seat price cannot be negative'],
+    },
+  },
+  { _id: false }
+);
+
+const paymentSchema = new mongoose.Schema(
+  {
+    provider: {
+      type: String,
+      default: 'stripe',
+    },
+    sessionId: {
+      type: String,
+    },
+    paymentIntentId: {
+      type: String,
+    },
+    status: {
+      type: String,
+    },
+    amountMinor: {
+      type: Number,
+    },
+    currency: {
+      type: String,
+    },
+    refundId: {
+      type: String,
+    },
+  },
+  { _id: false }
+);
+
 const bookingSchema = new mongoose.Schema(
   {
     reference: {
@@ -19,7 +77,7 @@ const bookingSchema = new mongoose.Schema(
       required: [true, 'Event reference is required'],
     },
     seats: {
-      type: [String],
+      type: [bookedSeatSchema],
       required: [true, 'At least one seat must be selected'],
       validate: [
         {
@@ -35,8 +93,15 @@ const bookingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['confirmed', 'cancelled'],
-      default: 'confirmed',
+      enum: ['pending', 'confirmed', 'cancelled', 'expired'],
+      default: 'pending',
+    },
+    holdExpiresAt: {
+      type: Date,
+    },
+    payment: {
+      type: paymentSchema,
+      default: () => ({}),
     },
     createdAt: {
       type: Date,
@@ -57,6 +122,7 @@ const bookingSchema = new mongoose.Schema(
 // Indexes (§C6.3)
 bookingSchema.index({ userRef: 1, createdAt: -1 });
 bookingSchema.index({ eventRef: 1 });
+bookingSchema.index({ status: 1, holdExpiresAt: 1 });
 
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;

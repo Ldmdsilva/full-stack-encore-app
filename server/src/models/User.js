@@ -25,6 +25,11 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Password hash is required'],
       select: false, // Do not return password hash by default
     },
+    phone: {
+      type: String,
+      required: [true, 'Phone number is required'],
+      match: [/^94[1-9][0-9]{8}$/, 'Phone must be a normalised Sri Lankan mobile number (94XXXXXXXXX)'],
+    },
     role: {
       type: String,
       enum: {
@@ -42,6 +47,8 @@ const userSchema = new mongoose.Schema(
     timestamps: false,
     toJSON: {
       transform: (_, ret) => {
+        ret.id = ret._id;
+        delete ret._id;
         delete ret.passwordHash;
         delete ret.__v;
         return ret;

@@ -20,6 +20,7 @@ describe('venueService Unit Tests (FR-22, ADR-002)', () => {
     const venue = await venueService.createVenue({
       name: 'Electric Arena',
       address: '10 Rock Boulevard',
+      city: 'Colombo',
       seatLayout: [
         { id: 'S-1', section: 'Standing', row: 'GA', number: 1 },
         { id: 'S-2', section: 'Standing', row: 'GA', number: 2 },
@@ -28,7 +29,21 @@ describe('venueService Unit Tests (FR-22, ADR-002)', () => {
 
     expect(venue._id).toBeDefined();
     expect(venue.name).toBe('Electric Arena');
+    expect(venue.city).toBe('Colombo');
     expect(venue.capacity).toBe(2);
+  });
+
+  it('FR-22: rejects venue creation with a missing city (400 VALIDATION_ERROR)', async () => {
+    await expect(
+      venueService.createVenue({
+        name: 'No City Hall',
+        address: '1 Nowhere Road',
+        seatLayout: [{ id: 'N-1', section: 'Main', row: 'A', number: 1 }],
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+    });
   });
 
   it('FR-22: rejects venue creation if seat layout exceeds 500 seats (ADR-002)', async () => {
@@ -43,6 +58,7 @@ describe('venueService Unit Tests (FR-22, ADR-002)', () => {
       venueService.createVenue({
         name: 'Huge Stadium',
         address: '99 Giant Ave',
+        city: 'Kandy',
         seatLayout: massiveLayout,
       })
     ).rejects.toMatchObject({
@@ -55,11 +71,13 @@ describe('venueService Unit Tests (FR-22, ADR-002)', () => {
     const created = await venueService.createVenue({
       name: 'Acoustic Room',
       address: '5 Jazz Street',
+      city: 'Galle',
       seatLayout: [{ id: 'J-1', section: 'Front', row: 'A', number: 1 }],
     });
 
     const found = await venueService.getVenueById(created._id);
     expect(found.name).toBe('Acoustic Room');
+    expect(found.city).toBe('Galle');
 
     const all = await venueService.getAllVenues();
     expect(all.length).toBeGreaterThanOrEqual(1);
@@ -69,12 +87,14 @@ describe('venueService Unit Tests (FR-22, ADR-002)', () => {
     const venue = await venueService.createVenue({
       name: 'Busy Venue',
       address: '22 Broadway',
+      city: 'Colombo',
       seatLayout: [{ id: 'B-1', section: 'Main', row: 'A', number: 1 }],
     });
 
     await Event.create({
       title: 'Referencing Concert',
       artist: 'Band X',
+      genre: 'Rock',
       date: new Date(Date.now() + 86400000),
       basePrice: 50,
       venueRef: venue._id,
@@ -92,6 +112,7 @@ describe('venueService Unit Tests (FR-22, ADR-002)', () => {
     const venue = await venueService.createVenue({
       name: 'Empty Venue',
       address: '1 Solitary Lane',
+      city: 'Jaffna',
       seatLayout: [{ id: 'E-1', section: 'Main', row: 'A', number: 1 }],
     });
 

@@ -1,10 +1,11 @@
+import { env } from './env.js';
 import mongoose from 'mongoose';
 
 /**
  * Connect to MongoDB database
- * @param {string} [uri] - Optional MongoDB URI (defaults to process.env.MONGODB_URI)
+ * @param {string} [uri] - Optional MongoDB URI (defaults to the configured MONGODB_URI)
  */
-export async function connectDB(uri = process.env.MONGODB_URI) {
+export async function connectDB(uri = env.MONGODB_URI) {
   if (!uri) {
     throw new Error('MONGODB_URI is not defined in environment variables');
   }

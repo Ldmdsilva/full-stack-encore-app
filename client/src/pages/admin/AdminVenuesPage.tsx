@@ -1,51 +1,75 @@
 import * as React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plus, Pencil, Trash2, Search } from 'lucide-react'
-import { VENUES } from '@/lib/mockData'
-import { EVENTS } from '@/lib/mockData'
+import * as venuesApi from '@/lib/api/venues'
+import * as adminApi from '@/lib/api/admin'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Spinner } from '@/components/ui/Spinner'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Modal } from '@/components/ui/Modal'
+import { useAsync } from '@/hooks/useAsync'
+import { parseApiError } from '@/lib/api/errors'
 import { cn } from '@/lib/utils'
-
-interface VenueRow {
-  id: string
-  name: string
-  city: string
-  address: string
-  capacity: number
-  eventCount: number
-}
-
-function buildVenueRows(): VenueRow[] {
-  return VENUES.map((v) => ({
-    id: v.id,
-    name: v.name,
-    city: v.city,
-    address: `${v.name}, ${v.city}`,
-    capacity: 108, // 9 rows × 12 seats from mockData
-    eventCount: EVENTS.filter((e) => e.venue.id === v.id).length,
-  }))
-}
+import type { Venue } from '@/lib/types'
 
 export function AdminVenuesPage() {
   const navigate = useNavigate()
-  const [venues, setVenues] = React.useState<VenueRow[]>(buildVenueRows)
   const [search, setSearch] = React.useState('')
-  const [deletingId, setDeletingId] = React.useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = React.useState<Venue | null>(null)
+  const [deleting, setDeleting] = React.useState(false)
+  const [deleteError, setDeleteError] = React.useState<string | null>(null)
 
-  const filtered = venues.filter((v) =>
-    `${v.name} ${v.city}`.toLowerCase().includes(search.toLowerCase()),
-  )
+  const venuesState = useAsync(() => venuesApi.list(), [], { isEmpty: (d) => d.venues.length === 0 })
+  // Admin's own listing includes cancelled and past events, so it's the
+  // accurate source for "is this venue safe to delete" — not the public
+  // (future + scheduled only) GET /api/events.
+  const eventsState = useAsync(() => adminApi.listEvents({ limit: 500 }), [])
 
-  const handleDelete = (id: string) => {
-    const venue = venues.find((v) => v.id === id)
-    if (venue && venue.eventCount > 0) {
-      alert(`Cannot delete "${venue.name}" — ${venue.eventCount} event(s) reference this venue.`)
-      setDeletingId(null)
-      return
+  const venues = venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
+  const eventCountByVenue = React.useMemo(() => {
+    const map = new Map<string, number>()
+    if (eventsState.status === 'success') {
+      for (const evt of eventsState.data.events) {
+        map.set(evt.venue.id, (map.get(evt.venue.id) ?? 0) + 1)
+      }
     }
-    setVenues((prev) => prev.filter((v) => v.id !== id))
-    setDeletingId(null)
+    return map
+  }, [eventsState])
+
+  const filtered = venues.filter((v) => `${v.name} ${v.city}`.toLowerCase().includes(search.toLowerCase()))
+
+  const closeModal = () => {
+    if (deleting) return
+    setDeleteTarget(null)
+    setDeleteError(null)
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await venuesApi.remove(deleteTarget.id)
+      setDeleteTarget(null)
+      venuesState.retry()
+    } catch (err) {
+      const apiError = parseApiError(err)
+      if (apiError.code === 'VENUE_IN_USE') {
+        const details = apiError.details as { referencingEventsCount?: number } | undefined
+        const count = details?.referencingEventsCount
+        setDeleteError(
+          count
+            ? `Cannot delete "${deleteTarget.name}" — ${count} event${count === 1 ? '' : 's'} reference this venue.`
+            : apiError.message,
+        )
+      } else {
+        setDeleteError(apiError.message)
+      }
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -78,108 +102,126 @@ export function AdminVenuesPage() {
         />
       </div>
 
-      {/* Table */}
-      <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card shadow-[var(--shadow-card)] overflow-hidden">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b-[0.5px] border-border bg-surface-sunk">
-              <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                Venue
-              </th>
-              <th className="hidden px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
-                Capacity
-              </th>
-              <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                Events
-              </th>
-              <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-4 py-12 text-center text-text-muted">
-                  {search ? `No venues match "${search}"` : 'No venues yet. Create one above.'}
-                </td>
-              </tr>
-            ) : (
-              filtered.map((v, i) => (
-                <tr
-                  key={v.id}
-                  className={cn(
-                    'transition-colors hover:bg-surface-sunk/40',
-                    i < filtered.length - 1 && 'border-b-[0.5px] border-border',
-                  )}
-                >
-                  <td className="px-4 py-3">
-                    <p className="font-medium leading-tight">{v.name}</p>
-                    <p className="mt-0.5 text-[11px] text-text-muted">{v.city}</p>
-                  </td>
-                  <td className="hidden px-4 py-3 text-right font-mono text-text-secondary md:table-cell">
-                    {v.capacity} seats
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {v.eventCount > 0 ? (
-                      <span className="font-mono text-[12px]">{v.eventCount}</span>
-                    ) : (
-                      <span className="text-[12px] text-text-muted">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <Link
-                        to={`/admin/venues/${v.id}/edit`}
-                        className="flex size-8 items-center justify-center rounded-[6px] border-[0.5px] border-border bg-card text-text-secondary transition-colors hover:border-border-strong hover:text-foreground"
-                        title="Edit venue"
-                      >
-                        <Pencil className="size-3.5" />
-                      </Link>
-                      {deletingId === v.id ? (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleDelete(v.id)}
-                            className="rounded-[6px] border-[0.5px] border-stamp-red/40 bg-stamp-red/10 px-2.5 py-1 text-[12px] text-stamp-red hover:bg-stamp-red/20"
-                          >
-                            Delete
-                          </button>
-                          <button
-                            onClick={() => setDeletingId(null)}
-                            className="text-[12px] text-text-muted hover:text-foreground"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() =>
-                            v.eventCount > 0
-                              ? alert(`Cannot delete "${v.name}" — ${v.eventCount} event(s) reference this venue.`)
-                              : setDeletingId(v.id)
-                          }
-                          className={cn(
-                            'flex size-8 items-center justify-center rounded-[6px] border-[0.5px] transition-colors',
-                            v.eventCount > 0
-                              ? 'cursor-not-allowed border-border text-seat-taken'
-                              : 'border-stamp-red/20 bg-stamp-red/5 text-stamp-red hover:bg-stamp-red/15',
-                          )}
-                          title={v.eventCount > 0 ? 'Cannot delete — events reference this venue' : 'Delete venue'}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
+      {venuesState.status === 'loading' && <Spinner label="Loading venues…" />}
+      {venuesState.status === 'error' && (
+        <ErrorState description={venuesState.error.message} onRetry={venuesState.retry} />
+      )}
+      {venuesState.status === 'empty' && (
+        <EmptyState title="No venues yet" description="Create one above." />
+      )}
+
+      {venuesState.status === 'success' && (
+        <>
+          {/* Table */}
+          <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card shadow-[var(--shadow-card)] overflow-hidden">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b-[0.5px] border-border bg-surface-sunk">
+                  <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Venue
+                  </th>
+                  <th className="hidden px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
+                    Capacity
+                  </th>
+                  <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Events
+                  </th>
+                  <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                    Actions
+                  </th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-3 font-mono text-[12px] text-text-muted">
-        {filtered.length} {filtered.length === 1 ? 'venue' : 'venues'}
-      </p>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-12 text-center text-text-muted">
+                      No venues match "{search}"
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((v, i) => {
+                    const eventCount = eventCountByVenue.get(v.id) ?? 0
+                    return (
+                      <tr
+                        key={v.id}
+                        className={cn(
+                          'transition-colors hover:bg-surface-sunk/40',
+                          i < filtered.length - 1 && 'border-b-[0.5px] border-border',
+                        )}
+                      >
+                        <td className="px-4 py-3">
+                          <p className="font-medium leading-tight">{v.name}</p>
+                          <p className="mt-0.5 text-[11px] text-text-muted">{v.city}</p>
+                        </td>
+                        <td className="hidden px-4 py-3 text-right font-mono text-text-secondary md:table-cell">
+                          {v.capacity} seats
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {eventCount > 0 ? (
+                            <span className="font-mono text-[12px]">{eventCount}</span>
+                          ) : (
+                            <span className="text-[12px] text-text-muted">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <Link
+                              to={`/admin/venues/${v.id}/edit`}
+                              className="flex size-8 items-center justify-center rounded-[6px] border-[0.5px] border-border bg-card text-text-secondary transition-colors hover:border-border-strong hover:text-foreground"
+                              title="Edit venue"
+                            >
+                              <Pencil className="size-3.5" />
+                            </Link>
+                            <button
+                              onClick={() => setDeleteTarget(v)}
+                              className="flex size-8 items-center justify-center rounded-[6px] border-[0.5px] border-stamp-red/20 bg-stamp-red/5 text-stamp-red transition-colors hover:bg-stamp-red/15"
+                              title="Delete venue"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 font-mono text-[12px] text-text-muted">
+            {filtered.length} {filtered.length === 1 ? 'venue' : 'venues'}
+          </p>
+        </>
+      )}
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeModal}
+        title="Delete this venue?"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={closeModal} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmDelete} isLoading={deleting}>
+              Delete venue
+            </Button>
+          </>
+        }
+      >
+        {deleteError ? (
+          <p role="alert" className="text-destructive">
+            {deleteError}
+          </p>
+        ) : (
+          deleteTarget && (
+            <p>
+              <span className="font-medium text-foreground">{deleteTarget.name}</span> will be
+              permanently deleted. This cannot be undone.
+            </p>
+          )
+        )}
+      </Modal>
     </div>
   )
 }

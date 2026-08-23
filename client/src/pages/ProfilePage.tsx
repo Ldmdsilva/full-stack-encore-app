@@ -1,14 +1,20 @@
 import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Mail, Lock, Trash2 } from 'lucide-react'
+import { User, Mail, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/toast'
-import { useStore } from '@/lib/store'
+import { useAuth } from '@/context/AuthContext'
+import * as authApi from '@/lib/api/auth'
+import { parseApiError } from '@/lib/api/errors'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_RE = /^(0|\+94|94)?7[0-9]{8}$/
 
 export function ProfilePage() {
   const navigate = useNavigate()
-  const { user, login, logout } = useStore()
+  const { user, updateProfile, logout } = useAuth()
   const { toast } = useToast()
 
   React.useEffect(() => {
@@ -17,53 +23,50 @@ export function ProfilePage() {
 
   const [name, setName] = React.useState(user?.name ?? '')
   const [email, setEmail] = React.useState(user?.email ?? '')
-  const [currentPassword, setCurrentPassword] = React.useState('')
-  const [newPassword, setNewPassword] = React.useState('')
+  const [phone, setPhone] = React.useState(user?.phone ?? '')
   const [profileError, setProfileError] = React.useState('')
-  const [passwordError, setPasswordError] = React.useState('')
   const [savingProfile, setSavingProfile] = React.useState(false)
-  const [savingPassword, setSavingPassword] = React.useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
 
   if (!user) return null
 
-  const saveProfile = (e: React.FormEvent) => {
+  const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
     if (name.trim().length < 2) {
       setProfileError('Name must be at least 2 characters.')
       return
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!EMAIL_RE.test(email)) {
       setProfileError('Enter a valid email address.')
+      return
+    }
+    if (!PHONE_RE.test(phone.replace(/\s/g, ''))) {
+      setProfileError('Enter a valid Sri Lankan mobile number, e.g. 0771234567.')
       return
     }
     setProfileError('')
     setSavingProfile(true)
-    setTimeout(() => {
-      login(email, name.trim())
-      setSavingProfile(false)
+    try {
+      await updateProfile({ name: name.trim(), email, phone: phone.trim() })
       toast('Profile updated.', 'success')
-    }, 600)
+    } catch (err) {
+      setProfileError(parseApiError(err).message)
+    } finally {
+      setSavingProfile(false)
+    }
   }
 
-  const savePassword = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (currentPassword.length < 8) {
-      setPasswordError('Enter your current password (8+ characters).')
-      return
+  const deleteAccount = async () => {
+    setDeleting(true)
+    try {
+      await authApi.deleteMe()
+      logout()
+      navigate('/')
+    } catch (err) {
+      toast(parseApiError(err).message, 'error')
+      setDeleting(false)
     }
-    if (newPassword.length < 8) {
-      setPasswordError('New password must be at least 8 characters.')
-      return
-    }
-    setPasswordError('')
-    setSavingPassword(true)
-    setTimeout(() => {
-      setSavingPassword(false)
-      setCurrentPassword('')
-      setNewPassword('')
-      toast('Password updated.', 'success')
-    }, 600)
   }
 
   return (
@@ -74,7 +77,7 @@ export function ProfilePage() {
           Your profile
         </h1>
         <p className="mt-1 text-text-secondary">
-          Manage your name, email, and password.
+          Manage your name, email, and phone number.
         </p>
       </div>
 
@@ -84,27 +87,27 @@ export function ProfilePage() {
           <User className="size-4 text-text-muted" />
           Personal details
         </h2>
-        <form onSubmit={saveProfile} className="mt-5 flex flex-col gap-4">
+        <form onSubmit={saveProfile} noValidate className="mt-5 flex flex-col gap-4">
           <Input
             label="Full name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Alex Rivera"
           />
-          <div>
-            <Input
-              label="Email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@email.com"
-            />
-            {user.email === 'admin@encore.live' && (
-              <p className="mt-1.5 text-[12px] text-text-muted">
-                Changing this email will remove admin access.
-              </p>
-            )}
-          </div>
+          <Input
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@email.com"
+          />
+          <Input
+            label="Mobile number"
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="0771234567"
+          />
           {profileError && (
             <p role="alert" className="text-[13px] text-destructive">
               {profileError}
@@ -116,39 +119,9 @@ export function ProfilePage() {
         </form>
       </section>
 
-      {/* Password section */}
-      <section className="mt-5 rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-6">
-        <h2 className="flex items-center gap-2 text-[16px] font-medium">
-          <Lock className="size-4 text-text-muted" />
-          Password
-        </h2>
-        <form onSubmit={savePassword} className="mt-5 flex flex-col gap-4">
-          <Input
-            label="Current password"
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            placeholder="Your current password"
-            autoComplete="current-password"
-          />
-          <Input
-            label="New password"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="At least 8 characters"
-            autoComplete="new-password"
-          />
-          {passwordError && (
-            <p role="alert" className="text-[13px] text-destructive">
-              {passwordError}
-            </p>
-          )}
-          <Button type="submit" size="md" variant="secondary" isLoading={savingPassword} className="self-start">
-            Update password
-          </Button>
-        </form>
-      </section>
+      {/* Password out of scope — no password endpoint exists on the server;
+          the build spec explicitly scopes password change out for this
+          coursework baseline. */}
 
       {/* Danger zone */}
       <section className="mt-5 rounded-[var(--radius-card)] border-[0.5px] border-stamp-red/20 bg-card p-6">
@@ -159,33 +132,36 @@ export function ProfilePage() {
         <p className="mt-2 text-[14px] text-text-secondary">
           Permanently removes your account and anonymises your booking history. This cannot be undone.
         </p>
-        {showDeleteConfirm ? (
-          <div className="mt-4 flex items-center gap-3">
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => {
-                logout()
-                navigate('/')
-              }}
-            >
-              Yes, delete my account
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-4 text-stamp-red hover:text-stamp-red"
+          onClick={() => setShowDeleteConfirm(true)}
+        >
+          Delete account
+        </Button>
+      </section>
+
+      <Modal
+        open={showDeleteConfirm}
+        onClose={() => !deleting && setShowDeleteConfirm(false)}
+        title="Delete your account?"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
               Cancel
             </Button>
-          </div>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-4 text-stamp-red hover:text-stamp-red"
-            onClick={() => setShowDeleteConfirm(true)}
-          >
-            Delete account
-          </Button>
-        )}
-      </section>
+            <Button variant="danger" size="sm" onClick={deleteAccount} isLoading={deleting}>
+              Yes, delete my account
+            </Button>
+          </>
+        }
+      >
+        <p>
+          This permanently removes your account and anonymises your booking history. This cannot
+          be undone.
+        </p>
+      </Modal>
 
       {/* Email contact link */}
       <div className="mt-6 flex items-center gap-2 text-[13px] text-text-muted">

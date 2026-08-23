@@ -19,8 +19,14 @@ export function Seat({
   onKeyNav,
   registerRef,
 }: SeatProps) {
-  const taken = seat.status === 'booked'
-  const state = taken ? 'unavailable' : isSelected ? 'selected' : 'available'
+  const isHeld = seat.status === 'held'
+  const isBooked = seat.status === 'booked'
+  const taken = isHeld || isBooked
+  const state = isHeld ? 'held' : isBooked ? 'unavailable' : isSelected ? 'selected' : 'available'
+
+  const ariaLabel = isHeld
+    ? `Seat ${seat.id}, row ${seat.row}, ${formatPrice(seat.price)}, on hold by another customer`
+    : `Seat ${seat.id}, row ${seat.row}, ${formatPrice(seat.price)}, ${state}`
 
   return (
     <button
@@ -30,7 +36,7 @@ export function Seat({
       disabled={taken}
       aria-disabled={taken}
       aria-pressed={isSelected}
-      aria-label={`Seat ${seat.id}, row ${seat.row}, ${formatPrice(seat.price)}, ${state}`}
+      aria-label={ariaLabel}
       onClick={() => !taken && onToggle(seat.id)}
       onKeyDown={(e) => onKeyNav(e, seat)}
       className={cn(
@@ -41,9 +47,12 @@ export function Seat({
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink',
       )}
     >
-      {/* Non-colour state cue for accessibility (NFR-11) */}
+      {/* Non-colour state cues for accessibility (NFR-11) */}
       {isSelected && (
         <span className="absolute inset-1 rounded-[2px] ring-2 ring-inset ring-ink/60" aria-hidden />
+      )}
+      {isHeld && (
+        <span className="absolute inset-0.5 rounded-[3px] border border-dashed border-ink/30" aria-hidden />
       )}
       <span className="relative">{seat.number}</span>
     </button>

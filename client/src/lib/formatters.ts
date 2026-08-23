@@ -1,10 +1,13 @@
 import type { Seat } from './types'
 
+// "Rs 6,500.00" — Intl's LKR symbol rendering is inconsistent across
+// engines, so the "Rs" prefix is applied directly over a plain grouped number.
 export function formatPrice(n: number): string {
-  return new Intl.NumberFormat('en-GB', {
-    style: 'currency',
-    currency: 'GBP',
+  const amount = new Intl.NumberFormat('en-LK', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(n)
+  return `Rs ${amount}`
 }
 
 // "Fri 12 Sep 2026, 20:00"
