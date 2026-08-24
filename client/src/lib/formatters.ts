@@ -1,4 +1,4 @@
-import type { Seat } from './types'
+import type { ShowtimeSeat } from './types'
 
 // "Rs 6,500.00" — Intl's LKR symbol rendering is inconsistent across
 // engines, so the "Rs" prefix is applied directly over a plain grouped number.
@@ -45,6 +45,6 @@ export function formatStubDate(iso: string): string {
   return `${weekday} · ${day} ${month} · ${time}`
 }
 
-export function formatSeatLabel(seat: Seat): string {
+export function formatSeatLabel(seat: ShowtimeSeat): string {
   return seat.id
 }

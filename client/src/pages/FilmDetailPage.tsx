@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { ArrowLeft, Clock, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'

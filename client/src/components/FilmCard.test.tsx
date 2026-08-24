@@ -19,7 +19,9 @@ function renderCard(film: Parameters<typeof FilmCard>[0]['film']) {
 describe('FilmCard', () => {
   it('shows the certificate and runtime', () => {
     renderCard(filmA)
-    expect(screen.getByText(filmA.certificate)).toBeInTheDocument()
+    // The certificate appears twice by design: once as the poster-overlay
+    // badge, once as the ticket stub's eyebrow.
+    expect(screen.getAllByText(filmA.certificate).length).toBeGreaterThan(0)
     expect(screen.getByText('1h 48m')).toBeInTheDocument()
   })
 

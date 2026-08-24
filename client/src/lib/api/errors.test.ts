@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseApiError } from './errors'
 import type { ApiError } from '../types'
 
-function axiosErrorLike(overrides: { response?: { data?: unknown } }) {
+function axiosErrorLike(overrides: { response?: { status?: number; data?: unknown } }) {
   return { isAxiosError: true, message: 'Request failed', ...overrides }
 }
 

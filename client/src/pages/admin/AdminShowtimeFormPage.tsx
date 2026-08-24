@@ -1,41 +1,33 @@
 import * as React from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2 } from 'lucide-react'
-import * as eventsApi from '@/lib/api/events'
-import * as venuesApi from '@/lib/api/venues'
+import { useNavigate } from 'react-router-dom'
+import { ArrowLeft, Save } from 'lucide-react'
+import * as filmsApi from '@/lib/api/films'
+import * as cinemasApi from '@/lib/api/cinemas'
+import * as showtimesApi from '@/lib/api/showtimes'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/Textarea'
 import { Spinner } from '@/components/ui/Spinner'
-import { ErrorState } from '@/components/ui/ErrorState'
-import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/toast'
 import { useAsync } from '@/hooks/useAsync'
 import { parseApiError } from '@/lib/api/errors'
-import type { EventStatus } from '@/lib/types'
+import { formatPrice } from '@/lib/formatters'
+import { SEAT_TIERS, TIER_LABELS, TIER_MULTIPLIERS } from '@/lib/tiers'
+import type { Cinema } from '@/lib/types'
 
-interface EventFormState {
-  title: string
-  artist: string
-  date: string
-  venueRef: string
+interface ShowtimeFormState {
+  filmRef: string
+  cinemaRef: string
+  screenId: string
+  startsAt: string
   basePrice: string
-  genre: string
-  description: string
-  imageUrl: string
-  status: EventStatus
 }
 
-const EMPTY_FORM: EventFormState = {
-  title: '',
-  artist: '',
-  date: '',
-  venueRef: '',
+const EMPTY_FORM: ShowtimeFormState = {
+  filmRef: '',
+  cinemaRef: '',
+  screenId: '',
+  startsAt: '',
   basePrice: '',
-  genre: '',
-  description: '',
-  imageUrl: '',
-  status: 'scheduled',
 }
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -53,61 +45,67 @@ function FormRow({ children }: { children: React.ReactNode }) {
   return <div className="sm:col-span-2">{children}</div>
 }
 
-export function AdminEventFormPage() {
-  const { id } = useParams<{ id?: string }>()
+// Server has no generic "update showtime" endpoint (only create and a
+// dedicated cancel action per showtimeRoutes.js), so this page only ever
+// creates — there is no edit mode.
+export function AdminShowtimeFormPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const isEdit = Boolean(id && id !== 'new')
 
-  const eventState = useAsync(
-    () => (isEdit && id ? eventsApi.getById(id) : Promise.resolve(null)),
-    [id, isEdit],
-  )
-  const venuesState = useAsync(() => venuesApi.list(), [], { isEmpty: (d) => d.venues.length === 0 })
+  const filmsState = useAsync(() => filmsApi.list({ limit: 100 }), [], { isEmpty: (d) => d.items.length === 0 })
+  const cinemasState = useAsync(() => cinemasApi.list(), [], { isEmpty: (d) => d.length === 0 })
 
-  const [form, setForm] = React.useState<EventFormState>(EMPTY_FORM)
-  const [errors, setErrors] = React.useState<Partial<Record<keyof EventFormState, string>>>({})
+  const [form, setForm] = React.useState<ShowtimeFormState>(EMPTY_FORM)
+  const [errors, setErrors] = React.useState<Partial<Record<keyof ShowtimeFormState, string>>>({})
   const [saving, setSaving] = React.useState(false)
-  const [deleteOpen, setDeleteOpen] = React.useState(false)
-  const [deleting, setDeleting] = React.useState(false)
 
-  // Derive the form's initial values from the fetched event once it lands.
-  // Adjusted during render (React's documented alternative to an effect
-  // that only mirrors another value) rather than in a useEffect, since the
-  // fetch itself is what's async — not this synchronisation step.
-  const [syncedFrom, setSyncedFrom] = React.useState<typeof eventState.data>(null)
-  if (eventState.status === 'success' && eventState.data && eventState.data !== syncedFrom) {
-    const existing = eventState.data.event
-    setSyncedFrom(eventState.data)
-    setForm({
-      title: existing.title,
-      artist: existing.artist,
-      date: existing.date.slice(0, 16),
-      venueRef: existing.venue.id,
-      basePrice: String(existing.basePrice),
-      genre: existing.genre,
-      description: existing.description ?? '',
-      imageUrl: existing.imageUrl ?? '',
-      status: existing.status,
-    })
-  }
+  // Fetch the full Cinema (with screens) once one is selected — the summary
+  // list has no screen data.
+  const [cinemaDetail, setCinemaDetail] = React.useState<Cinema | null>(null)
+  const [cinemaLoading, setCinemaLoading] = React.useState(false)
+  React.useEffect(() => {
+    if (!form.cinemaRef) {
+      setCinemaDetail(null)
+      return
+    }
+    let cancelled = false
+    setCinemaLoading(true)
+    cinemasApi
+      .getById(form.cinemaRef)
+      .then((c) => {
+        if (!cancelled) setCinemaDetail(c)
+      })
+      .catch((err) => {
+        if (!cancelled) toast(parseApiError(err).message, 'error')
+      })
+      .finally(() => {
+        if (!cancelled) setCinemaLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when the selected cinema changes
+  }, [form.cinemaRef])
 
-  const set = (key: keyof EventFormState) => (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
+  const set = (key: keyof ShowtimeFormState) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
-    setForm((prev) => ({ ...prev, [key]: e.target.value }))
+    setForm((prev) => ({
+      ...prev,
+      [key]: e.target.value,
+      // Changing the cinema invalidates whichever screen was selected for the previous one.
+      ...(key === 'cinemaRef' ? { screenId: '' } : {}),
+    }))
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }))
   }
 
   const validate = (): boolean => {
-    const errs: Partial<Record<keyof EventFormState, string>> = {}
-    if (!form.title.trim()) errs.title = 'Title is required'
-    if (!form.artist.trim()) errs.artist = 'Artist is required'
-    if (!form.date) errs.date = 'Date is required'
-    if (!form.venueRef) errs.venueRef = 'Select a venue'
+    const errs: Partial<Record<keyof ShowtimeFormState, string>> = {}
+    if (!form.filmRef) errs.filmRef = 'Select a film'
+    if (!form.cinemaRef) errs.cinemaRef = 'Select a cinema'
+    if (!form.screenId) errs.screenId = 'Select a screen'
+    if (!form.startsAt) errs.startsAt = 'Start time is required'
     if (!form.basePrice || Number(form.basePrice) <= 0) errs.basePrice = 'Enter a valid price'
-    if (!form.genre.trim()) errs.genre = 'Genre is required'
-    if (!form.description.trim()) errs.description = 'Description is required'
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -116,24 +114,15 @@ export function AdminEventFormPage() {
     if (!validate()) return
     setSaving(true)
     try {
-      const payload = {
-        title: form.title.trim(),
-        artist: form.artist.trim(),
-        genre: form.genre.trim(),
-        imageUrl: form.imageUrl.trim() || undefined,
-        description: form.description.trim(),
-        date: new Date(form.date).toISOString(),
+      await showtimesApi.create({
+        filmRef: form.filmRef,
+        cinemaRef: form.cinemaRef,
+        screenId: form.screenId,
+        startsAt: new Date(form.startsAt).toISOString(),
         basePrice: Number(form.basePrice),
-        venueRef: form.venueRef,
-      }
-      if (isEdit && id) {
-        await eventsApi.update(id, { ...payload, status: form.status })
-        toast('Changes saved.', 'success')
-      } else {
-        await eventsApi.create(payload)
-        toast('Event created.', 'success')
-      }
-      navigate('/admin/events')
+      })
+      toast('Showtime created.', 'success')
+      navigate('/admin/showtimes')
     } catch (err) {
       toast(parseApiError(err).message, 'error')
     } finally {
@@ -141,131 +130,77 @@ export function AdminEventFormPage() {
     }
   }
 
-  const handleDelete = async () => {
-    if (!id) return
-    setDeleting(true)
-    try {
-      await eventsApi.remove(id)
-      toast('Event deleted.', 'success')
-      navigate('/admin/events')
-    } catch (err) {
-      toast(parseApiError(err).message, 'error')
-      setDeleting(false)
-    }
-  }
-
-  const venues = venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
-  const selectedVenue = venues.find((v) => v.id === form.venueRef)
-
-  if (isEdit && eventState.status === 'loading') {
-    return <Spinner label="Loading event…" className="py-32" />
-  }
-
-  if (isEdit && eventState.status === 'error') {
-    return (
-      <div className="mx-auto max-w-2xl px-6 py-8">
-        <ErrorState description={eventState.error.message} onRetry={eventState.retry} />
-      </div>
-    )
-  }
+  const films = filmsState.status === 'success' || filmsState.status === 'empty' ? filmsState.data.items : []
+  const cinemas = cinemasState.status === 'success' || cinemasState.status === 'empty' ? cinemasState.data : []
+  const screens = cinemaDetail?.screens ?? []
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
       {/* Header */}
       <div className="mb-8">
         <button
-          onClick={() => navigate('/admin/events')}
+          onClick={() => navigate('/admin/showtimes')}
           className="mb-4 flex items-center gap-1.5 text-[13px] text-text-muted transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" />
-          Back to events
+          Back to showtimes
         </button>
-        <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
-          {isEdit ? 'Edit event' : 'New event'}
-        </p>
+        <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">New showtime</p>
         <h1 className="mt-1 font-voice text-[36px] font-medium leading-tight tracking-[-0.02em]">
-          {isEdit ? form.title || 'Edit event' : 'Create event'}
+          Create showtime
         </h1>
       </div>
 
       <div className="flex flex-col gap-8">
-        <FormSection title="Identity">
-          <Input
-            label="Show title"
-            placeholder="The Marfa Sessions"
-            value={form.title}
-            onChange={set('title')}
-            error={errors.title}
-          />
-          <Input
-            label="Artist / act"
-            placeholder="Phoebe Wren"
-            value={form.artist}
-            onChange={set('artist')}
-            error={errors.artist}
-          />
-          <Input
-            label="Genre"
-            placeholder="Folk, Soul, Post-rock…"
-            value={form.genre}
-            onChange={set('genre')}
-            error={errors.genre}
-            list="genre-suggestions"
-          />
-          <datalist id="genre-suggestions">
-            {['Folk', 'Soul', 'Contemporary', 'Synth-pop', 'Choral', 'Post-rock'].map((g) => (
-              <option key={g} value={g} />
-            ))}
-          </datalist>
+        <FormSection title="Film & cinema">
           <div>
-            <Select
-              label="Status"
-              value={form.status}
-              onChange={set('status')}
-            >
-              <option value="scheduled">Scheduled</option>
-              <option value="cancelled">Cancelled</option>
-            </Select>
-          </div>
-          <FormRow>
-            <Textarea
-              label="Description"
-              placeholder="A short paragraph shown on the event detail page."
-              value={form.description}
-              onChange={set('description')}
-              error={errors.description}
-            />
-          </FormRow>
-        </FormSection>
-
-        <FormSection title="When & where">
-          <Input
-            label="Date & time"
-            type="datetime-local"
-            value={form.date}
-            onChange={set('date')}
-            error={errors.date}
-          />
-          <div>
-            <Select
-              label="Venue"
-              value={form.venueRef}
-              onChange={set('venueRef')}
-            >
-              <option value="">Select venue…</option>
-              {venues.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}, {v.city}
+            <Select label="Film" value={form.filmRef} onChange={set('filmRef')}>
+              <option value="">Select film…</option>
+              {films.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title}
                 </option>
               ))}
             </Select>
-            {errors.venueRef && <p className="mt-1.5 text-[13px] text-destructive">{errors.venueRef}</p>}
-            {selectedVenue && !errors.venueRef && (
-              <p className="mt-1.5 font-mono text-[12px] text-text-muted">
-                {selectedVenue.city}
-              </p>
-            )}
+            {errors.filmRef && <p className="mt-1.5 text-[13px] text-destructive">{errors.filmRef}</p>}
           </div>
+          <div>
+            <Select label="Cinema" value={form.cinemaRef} onChange={set('cinemaRef')}>
+              <option value="">Select cinema…</option>
+              {cinemas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}, {c.city}
+                </option>
+              ))}
+            </Select>
+            {errors.cinemaRef && <p className="mt-1.5 text-[13px] text-destructive">{errors.cinemaRef}</p>}
+          </div>
+          <div>
+            <Select
+              label="Screen"
+              value={form.screenId}
+              onChange={set('screenId')}
+              disabled={!form.cinemaRef || cinemaLoading}
+            >
+              <option value="">{cinemaLoading ? 'Loading screens…' : 'Select screen…'}</option>
+              {screens.map((s) => (
+                <option key={s.screenId} value={s.screenId}>
+                  {s.name} ({s.capacity} seats)
+                </option>
+              ))}
+            </Select>
+            {errors.screenId && <p className="mt-1.5 text-[13px] text-destructive">{errors.screenId}</p>}
+          </div>
+        </FormSection>
+
+        <FormSection title="When">
+          <Input
+            label="Starts at"
+            type="datetime-local"
+            value={form.startsAt}
+            onChange={set('startsAt')}
+            error={errors.startsAt}
+          />
         </FormSection>
 
         <FormSection title="Ticketing">
@@ -274,101 +209,44 @@ export function AdminEventFormPage() {
             type="number"
             min="1"
             step="0.50"
-            placeholder="6500.00"
+            placeholder="1500.00"
             value={form.basePrice}
             onChange={set('basePrice')}
             error={errors.basePrice}
           />
-          <div className="flex flex-col gap-1.5">
-            <p className="text-[13px] text-text-secondary">Pricing tiers (auto)</p>
-            <div className="rounded-[var(--radius)] border-[0.5px] border-border bg-surface-sunk px-3 py-2.5 text-[13px] text-text-muted">
-              {form.basePrice ? (
-                <>
-                  <p className="font-mono">
-                    Stalls: Rs {Math.round(Number(form.basePrice) * 1.6)}
-                  </p>
-                  <p className="font-mono">
-                    Circle: Rs {Math.round(Number(form.basePrice) * 1.15)}
-                  </p>
-                  <p className="font-mono">
-                    Balcony: Rs {Math.round(Number(form.basePrice) * 0.85)}
-                  </p>
-                </>
-              ) : (
-                <span>Enter a base price above</span>
-              )}
-            </div>
-          </div>
           <FormRow>
-            <Input
-              label="Cover image URL"
-              type="url"
-              placeholder="https://images.unsplash.com/…"
-              value={form.imageUrl}
-              onChange={set('imageUrl')}
-            />
-          </FormRow>
-          {form.imageUrl && (
-            <FormRow>
-              <div className="overflow-hidden rounded-[var(--radius)] border-[0.5px] border-border">
-                <img
-                  src={form.imageUrl}
-                  alt="Event cover preview"
-                  className="h-36 w-full object-cover"
-                />
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[13px] text-text-secondary">Tier prices (system multipliers)</p>
+              <div className="rounded-[var(--radius)] border-[0.5px] border-border bg-surface-sunk px-3 py-2.5 text-[13px] text-text-muted">
+                {form.basePrice && Number(form.basePrice) > 0 ? (
+                  SEAT_TIERS.map((tier) => (
+                    <p key={tier} className="font-mono">
+                      {TIER_LABELS[tier]}: {formatPrice(Math.round(Number(form.basePrice) * TIER_MULTIPLIERS[tier]))}
+                    </p>
+                  ))
+                ) : (
+                  <span>Enter a base price above</span>
+                )}
               </div>
-            </FormRow>
-          )}
+            </div>
+          </FormRow>
         </FormSection>
       </div>
 
       {/* Footer actions */}
-      <div className="mt-8 flex items-center justify-between border-t-[0.5px] border-border pt-6">
-        {isEdit ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2 className="size-4" />
-            Delete event
-          </Button>
-        ) : (
-          <div />
-        )}
-        <div className="flex gap-3">
-          <Button variant="secondary" size="sm" onClick={() => navigate('/admin/events')}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleSave} isLoading={saving}>
-            <Save className="size-4" />
-            {isEdit ? 'Save changes' : 'Create event'}
-          </Button>
-        </div>
+      <div className="mt-8 flex items-center justify-end gap-3 border-t-[0.5px] border-border pt-6">
+        <Button variant="secondary" size="sm" onClick={() => navigate('/admin/showtimes')}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={handleSave} isLoading={saving}>
+          <Save className="size-4" />
+          Create showtime
+        </Button>
       </div>
 
-      <Modal
-        open={deleteOpen}
-        onClose={() => !deleting && setDeleteOpen(false)}
-        title="Delete this event?"
-        footer={
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setDeleteOpen(false)} disabled={deleting}>
-              Cancel
-            </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete} isLoading={deleting}>
-              Delete event
-            </Button>
-          </>
-        }
-      >
-        <p>
-          <span className="font-medium text-foreground">{form.title || 'This event'}</span> will
-          be deleted. Confirmed bookings against it are refunded and their customers notified.
-          This cannot be undone.
-        </p>
-      </Modal>
+      {(filmsState.status === 'loading' || cinemasState.status === 'loading') && (
+        <Spinner label="Loading films and cinemas…" className="py-8" />
+      )}
     </div>
   )
 }

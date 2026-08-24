@@ -30,7 +30,7 @@ describe('AppShell', () => {
     renderShell()
     expect(await screen.findByText('page-content')).toBeInTheDocument()
     expect(screen.getByText('Encore')).toBeInTheDocument()
-    expect(screen.getByText(/live music ticketing/i)).toBeInTheDocument()
+    expect(screen.getByText(/cinema ticketing/i)).toBeInTheDocument()
   })
 
   it('shows a "Sign in" link when signed out, and shows the user + sign out when signed in', async () => {

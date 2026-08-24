@@ -136,7 +136,19 @@ function ResolvedConfirmation({ bookingId }: { bookingId: string }) {
 
 type ReconcileState = 'polling' | 'timed-out'
 
-function ReconcilingConfirmation({ holdId }: { holdId: string }) {
+// pollIntervalMs/pollTimeoutMs default to the real production cadence — the
+// params exist so tests can drive this component with short real waits
+// instead of fighting fake-timer/testing-library interactions (passive
+// effects and internal waitFor polling aren't reliably advanceable together).
+export function ReconcilingConfirmation({
+  holdId,
+  pollIntervalMs = POLL_INTERVAL_MS,
+  pollTimeoutMs = POLL_TIMEOUT_MS,
+}: {
+  holdId: string
+  pollIntervalMs?: number
+  pollTimeoutMs?: number
+}) {
   const navigate = useNavigate()
   const { socket } = useSocket()
   const [state, setState] = React.useState<ReconcileState>('polling')
@@ -175,21 +187,21 @@ function ReconcilingConfirmation({ holdId }: { holdId: string }) {
         // this hold yet. Never treated as an error; just try again later.
       }
       if (cancelled || resolved) return
-      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
+      if (Date.now() - startedAt >= pollTimeoutMs) {
         setState('timed-out')
         return
       }
-      timeoutId = setTimeout(poll, POLL_INTERVAL_MS)
+      timeoutId = setTimeout(poll, pollIntervalMs)
     }
 
-    timeoutId = setTimeout(poll, POLL_INTERVAL_MS)
+    timeoutId = setTimeout(poll, pollIntervalMs)
 
     return () => {
       cancelled = true
       clearTimeout(timeoutId)
       socket.off('booking:confirmed', handleBookingConfirmed)
     }
-  }, [holdId, socket, navigate])
+  }, [holdId, socket, navigate, pollIntervalMs, pollTimeoutMs])
 
   if (state === 'timed-out') {
     return (

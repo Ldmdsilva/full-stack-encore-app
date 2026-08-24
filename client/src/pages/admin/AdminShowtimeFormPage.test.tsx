@@ -1,47 +1,47 @@
 import { describe, expect, it } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AdminEventFormPage } from './AdminEventFormPage'
+import { AdminShowtimeFormPage } from './AdminShowtimeFormPage'
 import { renderPage } from '@/test/utils'
-import { eventSummaryA, venueA } from '@/test/fixtures'
+import { filmA, cinemaA } from '@/test/fixtures'
 
-describe('AdminEventFormPage', () => {
-  it('validates required fields before submitting a new event', async () => {
+describe('AdminShowtimeFormPage', () => {
+  it('validates required fields before submitting', async () => {
     const user = userEvent.setup()
-    renderPage(<AdminEventFormPage />, '/admin/events/:id', { route: '/admin/events/new' })
-    await screen.findByRole('heading', { name: /create event/i })
+    renderPage(<AdminShowtimeFormPage />, '/admin/showtimes/new')
+    await screen.findByRole('heading', { name: /create showtime/i })
 
-    await user.click(screen.getByRole('button', { name: /create event/i }))
+    await user.click(screen.getByRole('button', { name: /create showtime/i }))
 
-    expect(await screen.findByText(/title is required/i)).toBeInTheDocument()
-    expect(screen.getByText(/artist is required/i)).toBeInTheDocument()
-    expect(screen.getByText(/select a venue/i)).toBeInTheDocument()
+    expect(await screen.findByText(/select a film/i)).toBeInTheDocument()
+    expect(screen.getByText(/select a cinema/i)).toBeInTheDocument()
+    expect(screen.getByText(/start time is required/i)).toBeInTheDocument()
   })
 
-  it('creates a new event once the form is valid', async () => {
+  it('cascades film -> cinema -> screen and shows a live tier-price preview', async () => {
     const user = userEvent.setup()
-    renderPage(<AdminEventFormPage />, '/admin/events/:id', { route: '/admin/events/new' })
-    await screen.findByRole('heading', { name: /create event/i })
+    renderPage(<AdminShowtimeFormPage />, '/admin/showtimes/new')
+    await screen.findByRole('heading', { name: /create showtime/i })
 
-    await user.type(screen.getByLabelText(/show title/i), 'New Show')
-    await user.type(screen.getByLabelText(/artist \/ act/i), 'New Artist')
-    await user.type(screen.getByLabelText(/^genre$/i), 'Folk')
-    await user.type(screen.getByLabelText(/description/i), 'A short description.')
-    await user.type(screen.getByLabelText(/date & time/i), '2026-12-01T20:00')
-    await screen.findByRole('option', { name: new RegExp(venueA.name) })
-    await user.selectOptions(screen.getByLabelText(/venue/i), venueA.id)
-    await user.type(screen.getByLabelText(/base price/i), '5000')
+    await screen.findByRole('option', { name: new RegExp(filmA.title) })
+    await user.selectOptions(screen.getByLabelText(/^film$/i), filmA.id)
 
-    await user.click(screen.getByRole('button', { name: /create event/i }))
+    await screen.findByRole('option', { name: new RegExp(cinemaA.name) })
+    await user.selectOptions(screen.getByLabelText(/^cinema$/i), cinemaA.id)
 
-    // On success the page navigates away to /admin/events — nothing left to assert here
-    // beyond the absence of a lingering error toast/validation message.
-    await waitFor(() => expect(screen.queryByText(/title is required/i)).not.toBeInTheDocument())
-  })
+    // Screens only populate once the full Cinema (with screens) loads.
+    await screen.findByRole('option', { name: new RegExp(cinemaA.screens[0].name) })
+    await user.selectOptions(screen.getByLabelText(/^screen$/i), cinemaA.screens[0].screenId)
 
-  it('loads an existing event into the form when editing', async () => {
-    renderPage(<AdminEventFormPage />, '/admin/events/:id/edit', { route: `/admin/events/${eventSummaryA.id}/edit` })
-    expect(await screen.findByDisplayValue(eventSummaryA.title)).toBeInTheDocument()
-    expect(screen.getByDisplayValue(eventSummaryA.artist)).toBeInTheDocument()
+    await user.type(screen.getByLabelText(/starts at/i), '2026-12-01T20:00')
+    await user.type(screen.getByLabelText(/base price/i), '1500')
+
+    expect(await screen.findByText(/standard:/i)).toBeInTheDocument()
+    expect(screen.getByText(/premium:/i)).toBeInTheDocument()
+    expect(screen.getByText(/recliner:/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /create showtime/i }))
+
+    await waitFor(() => expect(screen.queryByText(/select a film/i)).not.toBeInTheDocument())
   })
 })

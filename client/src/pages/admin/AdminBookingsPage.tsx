@@ -11,42 +11,44 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useAsync } from '@/hooks/useAsync'
 import { cn } from '@/lib/utils'
-import type { BookingStatus } from '@/lib/types'
+import type { Booking } from '@/lib/types'
 
-type StatusFilter = 'all' | BookingStatus
+type StatusFilter = 'all' | 'confirmed' | 'cancelled' | 'refunded'
 const PAGE_SIZE = 20
 
-const STATUS_VARIANT: Record<BookingStatus, 'confirmed' | 'pending' | 'cancelled' | 'expired'> = {
-  confirmed: 'confirmed',
-  pending: 'pending',
-  cancelled: 'cancelled',
-  expired: 'expired',
+function statusVariant(b: Booking): 'confirmed' | 'cancelled' | 'refunded' {
+  if (b.status === 'cancelled' && b.paymentStatus === 'refunded') return 'refunded'
+  return b.status
+}
+
+function statusLabel(b: Booking): string {
+  return statusVariant(b) === 'refunded' ? 'refunded' : b.status
 }
 
 export function AdminBookingsPage() {
   const [page, setPage] = React.useState(1)
   const [search, setSearch] = React.useState('')
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all')
-  const [eventFilter, setEventFilter] = React.useState('')
+  const [showtimeFilter, setShowtimeFilter] = React.useState('')
 
-  // Event list for the filter dropdown — admin scope, so it includes
-  // cancelled/past events too (adminApi.listEvents), not the public list.
-  const { status: eventsStatus, data: eventsData } = useAsync(() => adminApi.listEvents({ limit: 100 }), [])
-  const events = eventsStatus === 'success' || eventsStatus === 'empty' ? eventsData.events : []
+  // Showtime list for the filter dropdown — admin scope, so it includes
+  // cancelled/past showtimes too (adminApi.listShowtimes), not the public list.
+  const { status: showtimesStatus, data: showtimesData } = useAsync(() => adminApi.listShowtimes({ limit: 100 }), [])
+  const showtimes = showtimesStatus === 'success' || showtimesStatus === 'empty' ? showtimesData.items : []
 
   const { status, data, error, retry } = useAsync(
-    () => bookingsApi.listAll({ eventId: eventFilter || undefined, page, limit: PAGE_SIZE }),
-    [page, eventFilter],
+    () => bookingsApi.listAll({ showtimeId: showtimeFilter || undefined, page, limit: PAGE_SIZE }),
+    [page, showtimeFilter],
     { isEmpty: (d) => d.items.length === 0 },
   )
 
   const bookings = status === 'success' || status === 'empty' ? data.items : []
 
   const filtered = bookings.filter((b) => {
-    const matchStatus = statusFilter === 'all' || b.status === statusFilter
+    const matchStatus = statusFilter === 'all' || statusVariant(b) === statusFilter
     const matchSearch =
       !search ||
-      `${b.user?.name ?? ''} ${b.user?.email ?? ''} ${b.reference} ${b.event?.title ?? ''} ${b.event?.artist ?? ''}`
+      `${b.user?.name ?? ''} ${b.user?.email ?? ''} ${b.reference} ${b.showtime?.screenName ?? ''}`
         .toLowerCase()
         .includes(search.toLowerCase())
     return matchStatus && matchSearch
@@ -56,10 +58,10 @@ export function AdminBookingsPage() {
     .filter((b) => b.status === 'confirmed')
     .reduce((s, b) => s + b.totalPrice, 0)
 
-  const hasFilters = search || statusFilter !== 'all' || eventFilter
+  const hasFilters = search || statusFilter !== 'all' || showtimeFilter
 
-  const changeEventFilter = (value: string) => {
-    setEventFilter(value)
+  const changeShowtimeFilter = (value: string) => {
+    setShowtimeFilter(value)
     setPage(1)
   }
 
@@ -81,22 +83,22 @@ export function AdminBookingsPage() {
           <Search className="pointer-events-none absolute left-3 top-[34px] size-4 text-text-muted" />
           <Input
             label="Search (this page)"
-            placeholder="Fan name, ref, event…"
+            placeholder="Customer name, ref, screen…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
           />
         </div>
         <Select
-          label="Event"
-          value={eventFilter}
-          onChange={(e) => changeEventFilter(e.target.value)}
-          className="w-48"
+          label="Showtime"
+          value={showtimeFilter}
+          onChange={(e) => changeShowtimeFilter(e.target.value)}
+          className="w-56"
         >
-          <option value="">All events</option>
-          {events.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.title}
+          <option value="">All showtimes</option>
+          {showtimes.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.film?.title ?? s.screenName} · {formatEventDate(s.startsAt).split(',')[0]}
             </option>
           ))}
         </Select>
@@ -108,9 +110,8 @@ export function AdminBookingsPage() {
         >
           <option value="all">All statuses</option>
           <option value="confirmed">Confirmed</option>
-          <option value="pending">Pending</option>
           <option value="cancelled">Cancelled</option>
-          <option value="expired">Expired</option>
+          <option value="refunded">Refunded</option>
         </Select>
         {hasFilters && (
           <Button
@@ -119,7 +120,7 @@ export function AdminBookingsPage() {
             onClick={() => {
               setSearch('')
               setStatusFilter('all')
-              changeEventFilter('')
+              changeShowtimeFilter('')
             }}
             className="shrink-0"
           >
@@ -154,10 +155,10 @@ export function AdminBookingsPage() {
                     Ref
                   </th>
                   <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                    Fan
+                    Customer
                   </th>
                   <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
-                    Event
+                    Showtime
                   </th>
                   <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted lg:table-cell">
                     Seats
@@ -184,7 +185,7 @@ export function AdminBookingsPage() {
                       className={cn(
                         'transition-colors hover:bg-surface-sunk/40',
                         i < filtered.length - 1 && 'border-b-[0.5px] border-border',
-                        (b.status === 'cancelled' || b.status === 'expired') && 'opacity-60',
+                        b.status === 'cancelled' && 'opacity-60',
                       )}
                     >
                       <td className="px-4 py-3 font-mono text-[12px] text-text-secondary">
@@ -195,10 +196,10 @@ export function AdminBookingsPage() {
                         <p className="text-[11px] text-text-muted">{b.user?.email ?? ''}</p>
                       </td>
                       <td className="hidden px-4 py-3 md:table-cell">
-                        <p className="font-medium leading-tight">{b.event?.title ?? '—'}</p>
-                        {b.event && (
+                        <p className="font-medium leading-tight">{b.showtime?.screenName ?? '—'}</p>
+                        {b.showtime && (
                           <p className="text-[11px] text-text-muted">
-                            {formatEventDate(b.event.date).split(',')[0]}
+                            {formatEventDate(b.showtime.startsAt).split(',')[0]}
                           </p>
                         )}
                       </td>
@@ -211,7 +212,7 @@ export function AdminBookingsPage() {
                         {formatPrice(b.totalPrice)}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <Badge variant={STATUS_VARIANT[b.status]}>{b.status}</Badge>
+                        <Badge variant={statusVariant(b)}>{statusLabel(b)}</Badge>
                       </td>
                     </tr>
                   ))

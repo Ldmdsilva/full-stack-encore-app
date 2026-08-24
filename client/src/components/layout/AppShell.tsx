@@ -27,8 +27,8 @@ function Header() {
         </Link>
 
         <nav className="hidden items-center gap-6 sm:flex">
-          <NavLink to="/events" className={navClass}>
-            Concerts
+          <NavLink to="/films" className={navClass}>
+            Films
           </NavLink>
           <NavLink to="/bookings" className={navClass}>
             My tickets
@@ -90,7 +90,7 @@ function Footer() {
   return (
     <footer className="mt-20 border-t-[0.5px] border-border">
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-8 text-[13px] text-text-muted sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-mono">ENCORE · LIVE MUSIC TICKETING</p>
+        <p className="font-mono">ENCORE · CINEMA TICKETING</p>
         <p>A ticket you can almost tear.</p>
       </div>
     </footer>

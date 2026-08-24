@@ -1,41 +1,43 @@
-# figma-make-app
+# Encore Cinemas — client
 
-React + Vite + Tailwind CSS project running inside Figma Make.
+React 19 + Vite + Tailwind CSS v4 client for Encore Cinemas, a cinema
+ticket-booking app. This started from a Figma Make scaffold but has since
+been migrated off that domain (concerts → cinema) and grown well past the
+original scaffold's shape — treat this file, not the Figma Make defaults,
+as the source of truth.
 
-## Development Server
+## Running it
 
-A Vite development server is **already running** on `$PORT` (default 8443). You don't need to start it manually.
+`npm run dev` starts the Vite dev server (not already running for you —
+start it yourself). The server expects the API at `VITE_API_URL` and Stripe
+at `VITE_STRIPE_PUBLISHABLE_KEY` (see the root `README.md` for the exact
+gotcha around where that second one needs to be set).
 
-- Preview URL: The user can access the running app through the preview panel
-- Hot reload: Changes to source files are reflected immediately
+## Project structure
 
-## Project Structure
-
-This is the canonical project structure. Start with task-relevant files below. Only follow imports or inspect other files when required, when a documented path is missing, or when the repository contradicts this guide.
-
-- `src/main.tsx` - React entrypoint; imports `src/index.css` and mounts `src/App.tsx` into the `#root` element
-- `src/App.tsx` - Primary application component and the usual starting point for UI work
-- `src/index.css` - Global CSS entrypoint and Tailwind CSS v4 import
-- `index.html` - Vite HTML shell containing the `#root` element and loading `src/main.tsx`
-- `package.json` - Project dependencies and the Vite build, development, preview, and formatting scripts
-- `vite.config.ts` - Vite configuration with React, Tailwind CSS v4, and Figma Make plugins plus the `@` alias for `src`
-- `.mise.toml` - Toolchain versions for Node.js and pnpm
+- `src/main.tsx` — React entrypoint; imports `src/index.css` and mounts `src/App.tsx`
+- `src/App.tsx` — route table (public/customer shell + admin shell), composed from `src/routes/*` guards and `src/pages/*` page components
+- `src/routes/` — `ProtectedRoute`, `AdminRoute`, `VerifiedRoute` (email-verification gate)
+- `src/pages/` — one file per route; `src/pages/admin/` holds the admin CRUD pages
+- `src/components/` — `seats/` (seat map), `payments/` (Stripe Elements + PaymentIntent flow), `layout/` (`AppShell`/`AdminShell`), `ui/` (shared primitives)
+- `src/context/` — `AuthContext` (JWT session state), `SocketContext` (Socket.IO connection, showtime rooms)
+- `src/hooks/` — `useAsync` (generic fetch-to-render-state), `useShowtimeSeats` (live seat-map state for one showtime)
+- `src/lib/types.ts` — the full client-side API contract (Film/Cinema/Showtime/Hold/Booking), audited directly against the server
+- `src/lib/tiers.ts` — seat-tier display constants (mirrors `server/src/config/seatTiers.js`)
+- `src/lib/api/` — one module per resource (`films.ts`, `cinemas.ts`, `showtimes.ts`, `holds.ts`, `bookings.ts`, `auth.ts`, `admin.ts`, `dev.ts`), all built on the shared `client.ts` axios wrapper
+- `src/index.css` — global CSS entrypoint, Tailwind v4 theme tokens, design-system custom properties
+- `src/test/` — MSW handlers/fixtures and the `renderPage`/`renderRoutes` test harness
+- `vite.config.ts` — Vite config (`@tailwindcss/vite` plugin, `@` alias for `src`)
 
 ## Dependencies
 
-- Runtime: React 19 and React DOM 19
-- Styling: Tailwind CSS v4 with the `@tailwindcss/vite` plugin
-- Build tooling: Vite 8, TypeScript 5.7, and `@vitejs/plugin-react`
-- Formatting: oxfmt
-
-## Styling
-
-This project uses **Tailwind CSS v4** through the `@tailwindcss/vite` plugin configured in `vite.config.ts`. `src/index.css` imports Tailwind with `@import 'tailwindcss';`. Use Tailwind utility classes directly in JSX and put global CSS or Tailwind v4 theme customization in `src/index.css`. This scaffold does not need a Tailwind config file or PostCSS config.
-
-`src/main.tsx` imports `src/index.css`, so global font wiring belongs in `src/index.css`. Keep CSS `@import` statements first, then add any `@font-face` rules and font-family defaults there.
+- Runtime: React 19, React Router 7, `@stripe/react-stripe-js` + `@stripe/stripe-js` (Elements + PaymentIntent, not embedded Checkout), `socket.io-client`, `axios`
+- Styling: Tailwind CSS v4 via `@tailwindcss/vite` — no separate Tailwind/PostCSS config file; tokens live in `src/index.css`'s `@theme inline` block
+- Testing: Vitest, Testing Library, MSW, jest-axe
 
 ## Code quality
 
-- Use double quotes for strings containing apostrophes (`"We're here to help"`), or escape them in single-quoted strings. An unescaped apostrophe in a single-quoted string breaks the build.
+- This codebase uses **named exports** for components (`export function HomePage()`), not default exports — match that convention.
+- Use double quotes for strings containing apostrophes, or escape them in single-quoted strings.
 - Ensure JSX tags are closed and braces are balanced.
-- Export components as default exports.
+- The seat `aria-label` grammar in `src/components/seats/Seat.tsx` is frozen byte-for-byte (e2e specs and `Seat.test.tsx` depend on its anchors) — never reorder or reword it; add new information via `aria-describedby` instead.

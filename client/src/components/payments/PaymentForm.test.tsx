@@ -132,18 +132,15 @@ describe('PaymentForm', () => {
   })
 
   it('disables the pay button once the hold countdown reaches zero and reports the expiry', async () => {
-    vi.useFakeTimers()
-    try {
-      const onExpire = vi.fn()
-      mockedUseStripe.mockReturnValue({ confirmPayment: vi.fn() } as unknown as ReturnType<typeof useStripe>)
+    // HoldCountdown's expiry check runs in a passive effect scheduled via
+    // React's own scheduler (MessageChannel-based), which fake timers don't
+    // drive — so this uses a short REAL countdown instead of vi.useFakeTimers.
+    const onExpire = vi.fn()
+    mockedUseStripe.mockReturnValue({ confirmPayment: vi.fn() } as unknown as ReturnType<typeof useStripe>)
 
-      renderForm(future(3000), 'hold-1', onExpire)
+    renderForm(future(1000), 'hold-1', onExpire)
 
-      await vi.advanceTimersByTimeAsync(3000)
-      expect(onExpire).toHaveBeenCalledTimes(1)
-      expect(screen.getByRole('button', { name: /pay now/i })).toBeDisabled()
-    } finally {
-      vi.useRealTimers()
-    }
+    await waitFor(() => expect(onExpire).toHaveBeenCalledTimes(1), { timeout: 3000 })
+    expect(screen.getByRole('button', { name: /pay now/i })).toBeDisabled()
   })
 })

@@ -9,7 +9,7 @@ import { formatLkr, formatShowtimeDateTime } from '../utils/currency.js';
 export function bookingConfirmedSms({ booking, event, venue }) {
   const seatList = booking.seats.map((seat) => `${seat.row}-${seat.number}`).join(', ');
   const venueLabel = venue ? venue.name : '';
-  return `Encore: Booking ${booking.reference} confirmed. ${event.artist}, ${formatShowtimeDateTime(event.date)}, ${venueLabel}. Seats ${seatList}. Total ${formatLkr(booking.totalPrice)}. Show this reference at the door.`;
+  return `Encore: Booking ${booking.reference} confirmed. ${event.title}, ${formatShowtimeDateTime(event.date)}, ${venueLabel}. Seats ${seatList}. Total ${formatLkr(booking.totalPrice)}. Show this reference at the door.`;
 }
 
 export function bookingCancelledSms({ booking }) {

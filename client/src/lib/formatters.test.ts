@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatEventDate, formatPrice, formatSeatLabel, formatStubDate } from './formatters'
-import type { Seat } from './types'
+import type { ShowtimeSeat } from './types'
 
 describe('formatPrice', () => {
   it('formats a number as grouped LKR with two decimals', () => {
@@ -35,7 +35,7 @@ describe('formatStubDate', () => {
 
 describe('formatSeatLabel', () => {
   it('returns the seat id', () => {
-    const seat: Seat = { id: 'B-14', section: 'STALLS', row: 'B', number: 14, status: 'available', price: 6500 }
+    const seat: ShowtimeSeat = { id: 'B-14', section: 'STALLS', row: 'B', number: 14, tier: 'STANDARD', status: 'available', price: 6500 }
     expect(formatSeatLabel(seat)).toBe('B-14')
   })
 })

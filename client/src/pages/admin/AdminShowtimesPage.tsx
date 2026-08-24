@@ -1,8 +1,8 @@
 import * as React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Plus, Pencil, ToggleLeft, ToggleRight, Search, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Search, XCircle, ChevronLeft, ChevronRight } from 'lucide-react'
 import * as adminApi from '@/lib/api/admin'
-import * as eventsApi from '@/lib/api/events'
+import * as showtimesApi from '@/lib/api/showtimes'
 import { formatPrice, formatEventDate } from '@/lib/formatters'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,52 +15,39 @@ import { useToast } from '@/components/ui/toast'
 import { useAsync } from '@/hooks/useAsync'
 import { parseApiError } from '@/lib/api/errors'
 import { cn } from '@/lib/utils'
-import type { AdminEvent } from '@/lib/types'
+import type { AdminShowtime } from '@/lib/types'
 
 const PAGE_SIZE = 20
 
-export function AdminEventsPage() {
+export function AdminShowtimesPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const [page, setPage] = React.useState(1)
   const [search, setSearch] = React.useState('')
-  const [deleteTarget, setDeleteTarget] = React.useState<AdminEvent | null>(null)
-  const [deleting, setDeleting] = React.useState(false)
-  const [togglingId, setTogglingId] = React.useState<string | null>(null)
+  const [cancelTarget, setCancelTarget] = React.useState<AdminShowtime | null>(null)
+  const [cancelling, setCancelling] = React.useState(false)
 
-  const { status, data, error, retry } = useAsync(() => adminApi.listEvents({ page, limit: PAGE_SIZE }), [page], {
-    isEmpty: (d) => d.events.length === 0,
+  const { status, data, error, retry } = useAsync(() => adminApi.listShowtimes({ page, limit: PAGE_SIZE }), [page], {
+    isEmpty: (d) => d.items.length === 0,
   })
 
-  const events = status === 'success' || status === 'empty' ? data.events : []
-  const filtered = events.filter((e) =>
-    `${e.title} ${e.artist} ${e.venue.name}`.toLowerCase().includes(search.toLowerCase()),
+  const showtimes = status === 'success' || status === 'empty' ? data.items : []
+  const filtered = showtimes.filter((s) =>
+    `${s.film?.title ?? ''} ${s.cinema?.name ?? ''} ${s.screenName}`.toLowerCase().includes(search.toLowerCase()),
   )
 
-  const toggleStatus = async (evt: AdminEvent) => {
-    setTogglingId(evt.id)
+  const confirmCancel = async () => {
+    if (!cancelTarget) return
+    setCancelling(true)
     try {
-      await eventsApi.update(evt.id, { status: evt.status === 'scheduled' ? 'cancelled' : 'scheduled' })
+      await showtimesApi.cancel(cancelTarget.id)
+      toast('Showtime cancelled.', 'success')
+      setCancelTarget(null)
       retry()
     } catch (err) {
       toast(parseApiError(err).message, 'error')
     } finally {
-      setTogglingId(null)
-    }
-  }
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return
-    setDeleting(true)
-    try {
-      await eventsApi.remove(deleteTarget.id)
-      toast('Event deleted.', 'success')
-      setDeleteTarget(null)
-      retry()
-    } catch (err) {
-      toast(parseApiError(err).message, 'error')
-    } finally {
-      setDeleting(false)
+      setCancelling(false)
     }
   }
 
@@ -73,12 +60,12 @@ export function AdminEventsPage() {
             Manage
           </p>
           <h1 className="mt-1 font-voice text-[36px] font-medium leading-tight tracking-[-0.02em]">
-            Events
+            Showtimes
           </h1>
         </div>
-        <Button onClick={() => navigate('/admin/events/new')} size="sm">
+        <Button onClick={() => navigate('/admin/showtimes/new')} size="sm">
           <Plus className="size-4" />
-          New event
+          New showtime
         </Button>
       </div>
 
@@ -86,17 +73,17 @@ export function AdminEventsPage() {
       <div className="mb-5 relative max-w-sm">
         <Search className="pointer-events-none absolute left-3 top-[34px] size-4 text-text-muted" />
         <Input
-          label="Search events"
-          placeholder="Title, artist, venue…"
+          label="Search showtimes"
+          placeholder="Film, cinema, screen…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9"
         />
       </div>
 
-      {status === 'loading' && <Spinner label="Loading events…" />}
+      {status === 'loading' && <Spinner label="Loading showtimes…" />}
       {status === 'error' && <ErrorState description={error.message} onRetry={retry} />}
-      {status === 'empty' && <EmptyState title="No events yet" description="Create your first event above." />}
+      {status === 'empty' && <EmptyState title="No showtimes yet" description="Create your first showtime above." />}
 
       {status === 'success' && (
         <>
@@ -106,10 +93,10 @@ export function AdminEventsPage() {
               <thead>
                 <tr className="border-b-[0.5px] border-border bg-surface-sunk">
                   <th className="px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                    Event
+                    Showtime
                   </th>
                   <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
-                    Date
+                    Starts
                   </th>
                   <th className="hidden px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted lg:table-cell">
                     Revenue
@@ -129,37 +116,36 @@ export function AdminEventsPage() {
                 {filtered.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-12 text-center text-text-muted">
-                      No events match "{search}"
+                      No showtimes match "{search}"
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((evt, i) => {
-                    const booked = evt.totalSeats - evt.availableSeats
-                    const pct = evt.totalSeats > 0 ? Math.round((booked / evt.totalSeats) * 100) : 0
+                  filtered.map((s, i) => {
+                    const booked = s.totalSeats - s.availableSeats
+                    const pct = s.totalSeats > 0 ? Math.round((booked / s.totalSeats) * 100) : 0
                     return (
                       <tr
-                        key={evt.id}
+                        key={s.id}
                         className={cn(
                           'transition-colors hover:bg-surface-sunk/40',
                           i < filtered.length - 1 && 'border-b-[0.5px] border-border',
                         )}
                       >
                         <td className="px-4 py-3">
-                          <p className="font-medium leading-tight">{evt.title}</p>
-                          <p className="mt-0.5 text-[11px] text-text-muted">{evt.artist}</p>
-                          <p className="mt-0.5 font-mono text-[11px] text-text-muted">
-                            {evt.venue.name}, {evt.venue.city}
+                          <p className="font-medium leading-tight">{s.film?.title ?? '—'}</p>
+                          <p className="mt-0.5 text-[11px] text-text-muted">
+                            {s.cinema?.name} · {s.screenName}
                           </p>
                         </td>
                         <td className="hidden px-4 py-3 text-text-secondary md:table-cell">
-                          {formatEventDate(evt.date)}
+                          {formatEventDate(s.startsAt)}
                         </td>
                         <td className="hidden px-4 py-3 text-right font-mono lg:table-cell">
-                          {formatPrice(evt.revenue)}
+                          {formatPrice(s.revenue)}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <p className="font-mono text-[12px]">
-                            {booked}/{evt.totalSeats}
+                            {booked}/{s.totalSeats}
                           </p>
                           <div className="mt-1 ml-auto h-1 w-16 overflow-hidden rounded-full bg-surface-sunk">
                             <div
@@ -169,45 +155,21 @@ export function AdminEventsPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <Badge
-                            variant={evt.status === 'scheduled' ? 'confirmed' : 'cancelled'}
-                          >
-                            {evt.status}
+                          <Badge variant={s.status === 'scheduled' ? 'confirmed' : 'cancelled'}>
+                            {s.status}
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
-                            <Link
-                              to={`/admin/events/${evt.id}/edit`}
-                              className="flex size-8 items-center justify-center rounded-[6px] border-[0.5px] border-border bg-card text-text-secondary transition-colors hover:border-border-strong hover:text-foreground"
-                              title="Edit event"
-                            >
-                              <Pencil className="size-3.5" />
-                            </Link>
-                            <button
-                              onClick={() => toggleStatus(evt)}
-                              disabled={togglingId === evt.id}
-                              className={cn(
-                                'flex size-8 items-center justify-center rounded-[6px] border-[0.5px] transition-colors disabled:opacity-50',
-                                evt.status === 'scheduled'
-                                  ? 'border-seat-free/30 bg-seat-free/10 text-seat-free hover:bg-seat-free/20'
-                                  : 'border-stamp-red/30 bg-stamp-red/10 text-stamp-red hover:bg-stamp-red/20',
-                              )}
-                              title={evt.status === 'scheduled' ? 'Cancel event' : 'Re-schedule event'}
-                            >
-                              {evt.status === 'scheduled' ? (
-                                <ToggleRight className="size-3.5" />
-                              ) : (
-                                <ToggleLeft className="size-3.5" />
-                              )}
-                            </button>
-                            <button
-                              onClick={() => setDeleteTarget(evt)}
-                              className="flex size-8 items-center justify-center rounded-[6px] border-[0.5px] border-stamp-red/20 bg-stamp-red/5 text-stamp-red transition-colors hover:bg-stamp-red/15"
-                              title="Delete event"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
+                            {s.status === 'scheduled' && (
+                              <button
+                                onClick={() => setCancelTarget(s)}
+                                className="flex size-8 items-center justify-center rounded-[6px] border-[0.5px] border-stamp-red/20 bg-stamp-red/5 text-stamp-red transition-colors hover:bg-stamp-red/15"
+                                title="Cancel showtime"
+                              >
+                                <XCircle className="size-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -220,7 +182,7 @@ export function AdminEventsPage() {
 
           <div className="mt-3 flex items-center justify-between">
             <p className="font-mono text-[12px] text-text-muted">
-              {filtered.length} {filtered.length === 1 ? 'event' : 'events'} on this page
+              {filtered.length} {filtered.length === 1 ? 'showtime' : 'showtimes'} on this page
             </p>
             {status === 'success' && data.totalPages > 1 && (
               <div className="flex items-center gap-3">
@@ -245,24 +207,24 @@ export function AdminEventsPage() {
       )}
 
       <Modal
-        open={deleteTarget !== null}
-        onClose={() => !deleting && setDeleteTarget(null)}
-        title="Delete this event?"
+        open={cancelTarget !== null}
+        onClose={() => !cancelling && setCancelTarget(null)}
+        title="Cancel this showtime?"
         footer={
           <>
-            <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(null)} disabled={deleting}>
-              Cancel
+            <Button variant="ghost" size="sm" onClick={() => setCancelTarget(null)} disabled={cancelling}>
+              Keep showtime
             </Button>
-            <Button variant="danger" size="sm" onClick={confirmDelete} isLoading={deleting}>
-              Delete event
+            <Button variant="danger" size="sm" onClick={confirmCancel} isLoading={cancelling}>
+              Cancel showtime
             </Button>
           </>
         }
       >
-        {deleteTarget && (
+        {cancelTarget && (
           <p>
-            <span className="font-medium text-foreground">{deleteTarget.title}</span> will be
-            deleted. Confirmed bookings against it are refunded and their customers notified.
+            <span className="font-medium text-foreground">{cancelTarget.film?.title ?? cancelTarget.screenName}</span> will be
+            cancelled. Confirmed bookings against it are refunded and their customers notified.
             This cannot be undone.
           </p>
         )}

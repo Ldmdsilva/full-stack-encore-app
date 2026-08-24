@@ -1,15 +1,14 @@
 import { useNavigate, Link } from 'react-router-dom'
 import { ArrowRight, Radio, MapPin, Clock, Ticket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { EventCard } from '@/components/EventCard'
+import { FilmCard } from '@/components/FilmCard'
 import { TicketStub } from '@/components/TicketStub'
 import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useAsync } from '@/hooks/useAsync'
-import * as eventsApi from '@/lib/api/events'
-import * as venuesApi from '@/lib/api/venues'
-import { formatStubDate, formatPrice } from '@/lib/formatters'
+import * as filmsApi from '@/lib/api/films'
+import * as cinemasApi from '@/lib/api/cinemas'
 
 // Pulse dot — the live-sync indicator used across the hero
 function PulseDot({ className = '' }: { className?: string }) {
@@ -46,22 +45,28 @@ function StatPill({ value, label }: { value: string; label: string }) {
   )
 }
 
+// "2h 8m" / "48m"
+function runtimeLabel(minutes: number) {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
 export function HomePage() {
   const navigate = useNavigate()
 
   // Fetch a small batch up front — one card doubles as the hero stub, the
-  // rest fill the "Upcoming shows" and "signature" sections below.
-  const eventsState = useAsync(() => eventsApi.list({ limit: 4 }), [], {
-    isEmpty: (d) => d.events.length === 0,
+  // rest fill the "Now showing" and "signature" sections below.
+  const filmsState = useAsync(() => filmsApi.list({ limit: 4 }), [], {
+    isEmpty: (d) => d.items.length === 0,
   })
-  const venuesState = useAsync(() => venuesApi.list(), [], { isEmpty: (d) => d.venues.length === 0 })
+  const cinemasState = useAsync(() => cinemasApi.list(), [], { isEmpty: (d) => d.length === 0 })
 
-  const events = eventsState.status === 'success' || eventsState.status === 'empty' ? eventsState.data.events : []
-  const totalShows = eventsState.status === 'success' || eventsState.status === 'empty' ? eventsState.data.total : 0
-  const heroEvent = events[events.length - 1]
-  const featuredEvents = events.slice(0, 3)
-  const totalAvailableSeats = events.reduce((s, e) => s + e.availableSeats, 0)
-  const venues = venuesState.status === 'success' || venuesState.status === 'empty' ? venuesState.data.venues : []
+  const films = filmsState.status === 'success' || filmsState.status === 'empty' ? filmsState.data.items : []
+  const totalFilms = filmsState.status === 'success' || filmsState.status === 'empty' ? filmsState.data.total : 0
+  const heroFilm = films[0]
+  const featuredFilms = films.slice(0, 3)
+  const cinemas = cinemasState.status === 'success' || cinemasState.status === 'empty' ? cinemasState.data : []
 
   return (
     <>
@@ -73,25 +78,25 @@ export function HomePage() {
             <div className="mb-5 inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-[0.5px] border-seat-free/30 bg-seat-free/10 px-3 py-1.5">
               <PulseDot />
               <span className="font-mono text-[11px] uppercase tracking-widest text-seat-free">
-                Live seat maps · Autumn 2026
+                Live seat maps · Now showing
               </span>
             </div>
 
             <h1 className="mt-2 font-voice text-[48px] font-medium leading-[1.0] tracking-[-0.025em] sm:text-[64px] lg:text-[72px]">
               Pick your seat,{' '}
               <em className="not-italic text-stamp-red">not just</em> your
-              show.
+              screening.
             </h1>
 
             <p className="mt-5 max-w-lg text-[18px] leading-[1.7] text-text-secondary">
               Encore shows you every seat in the house — live, as they sell.
               Book what you actually want, get a printed ticket stub, and watch
-              the house fill in real time.
+              the screen fill in real time.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button size="lg" onClick={() => navigate('/events')}>
-                Browse concerts
+              <Button size="lg" onClick={() => navigate('/films')}>
+                Browse films
                 <ArrowRight className="size-4" />
               </Button>
               <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
@@ -101,8 +106,8 @@ export function HomePage() {
 
             {/* Stat row */}
             <div className="mt-10 flex flex-wrap gap-3">
-              <StatPill value={String(totalShows)} label="shows on sale" />
-              <StatPill value={totalAvailableSeats.toLocaleString()} label="seats available" />
+              <StatPill value={String(totalFilms)} label="films now showing" />
+              <StatPill value={String(cinemas.length)} label="cinemas" />
               <StatPill value="<1s" label="seat-sync time" />
             </div>
           </div>
@@ -113,30 +118,30 @@ export function HomePage() {
             <div className="absolute inset-x-4 top-3 h-full rounded-[var(--radius-card)] bg-ink/10" />
             <div className="absolute inset-x-2 top-1.5 h-full rounded-[var(--radius-card)] bg-ink/6" />
 
-            {eventsState.status === 'loading' && <Spinner label="Loading shows…" className="relative w-full" />}
-            {eventsState.status === 'error' && (
+            {filmsState.status === 'loading' && <Spinner label="Loading films…" className="relative w-full" />}
+            {filmsState.status === 'error' && (
               <ErrorState
-                description={eventsState.error.message}
-                onRetry={eventsState.retry}
+                description={filmsState.error.message}
+                onRetry={filmsState.retry}
                 className="relative w-full"
               />
             )}
-            {eventsState.status === 'empty' && (
-              <EmptyState title="No shows on sale yet" className="relative w-full" />
+            {filmsState.status === 'empty' && (
+              <EmptyState title="No films on sale yet" className="relative w-full" />
             )}
-            {eventsState.status === 'success' && heroEvent && (
+            {filmsState.status === 'success' && heroFilm && (
               <>
                 <TicketStub
-                  eyebrow={formatStubDate(heroEvent.date)}
-                  title={heroEvent.artist}
-                  subtitle={heroEvent.title}
+                  eyebrow={heroFilm.certificate}
+                  title={heroFilm.title}
+                  subtitle={heroFilm.genre.join(' · ')}
                   fields={[
-                    { label: 'Venue', value: heroEvent.venue.name },
-                    { label: 'From', value: formatPrice(heroEvent.basePrice) },
-                    { label: 'Seats', value: `${heroEvent.availableSeats} left` },
+                    { label: 'Runtime', value: runtimeLabel(heroFilm.runtimeMinutes) },
+                    { label: 'Certificate', value: heroFilm.certificate },
+                    { label: 'Genre', value: heroFilm.genre[0] ?? '—' },
                   ]}
-                  serial={`ENC-${heroEvent.id.slice(-4).toUpperCase()}`}
-                  onClick={() => navigate(`/events/${heroEvent.id}`)}
+                  serial={`FLM-${heroFilm.id.slice(-4).toUpperCase()}`}
+                  onClick={() => navigate(`/films/${heroFilm.id}`)}
                   className="relative w-full max-w-sm"
                 />
 
@@ -167,14 +172,14 @@ export function HomePage() {
               {
                 step: '01',
                 icon: MapPin,
-                title: 'Find your show',
-                body: 'Browse upcoming concerts by artist, venue, genre, or date. Every event shows real-time seat count — no false "only 2 left" pressure.',
+                title: 'Find your film',
+                body: 'Browse now-showing films by genre or title, then pick a cinema and time. Every showtime shows real-time seat count — no false "only 2 left" pressure.',
               },
               {
                 step: '02',
                 icon: Ticket,
                 title: 'Pick your seats',
-                body: 'Tap a seat on the live map to select it. Green means available. If another fan takes it while you browse, it turns grey immediately — no surprises at checkout.',
+                body: 'Tap a seat on the live map to select it. Green means available. If another moviegoer takes it while you browse, it turns grey immediately — no surprises at checkout.',
               },
               {
                 step: '03',
@@ -203,35 +208,35 @@ export function HomePage() {
         </div>
       </section>
 
-      {/* ─── Featured events ──────────────────────────────────────────── */}
+      {/* ─── Now showing ──────────────────────────────────────────────── */}
       <section className="border-b-[0.5px] border-border">
         <div className="mx-auto max-w-6xl px-5 py-16">
           <div className="mb-8 flex items-baseline justify-between">
             <div>
-              <p className="eyebrow text-stamp-red">On sale now</p>
+              <p className="eyebrow text-stamp-red">On screen now</p>
               <h2 className="mt-2 font-voice text-[36px] font-medium tracking-[-0.02em]">
-                Upcoming shows
+                Now showing
               </h2>
             </div>
             <Link
-              to="/events"
+              to="/films"
               className="flex items-center gap-1 text-[14px] text-stamp-red transition-opacity hover:opacity-75"
             >
-              All concerts <ArrowRight className="size-4" />
+              All films <ArrowRight className="size-4" />
             </Link>
           </div>
 
-          {eventsState.status === 'loading' && <Spinner label="Loading shows…" />}
-          {eventsState.status === 'error' && (
-            <ErrorState description={eventsState.error.message} onRetry={eventsState.retry} />
+          {filmsState.status === 'loading' && <Spinner label="Loading films…" />}
+          {filmsState.status === 'error' && (
+            <ErrorState description={filmsState.error.message} onRetry={filmsState.retry} />
           )}
-          {eventsState.status === 'empty' && (
-            <EmptyState title="No shows on sale yet" description="Check back soon." />
+          {filmsState.status === 'empty' && (
+            <EmptyState title="No films on sale yet" description="Check back soon." />
           )}
-          {eventsState.status === 'success' && (
+          {filmsState.status === 'success' && (
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {featuredEvents.map((e) => (
-                <EventCard key={e.id} event={e} />
+              {featuredFilms.map((f) => (
+                <FilmCard key={f.id} film={f} />
               ))}
             </div>
           )}
@@ -252,7 +257,8 @@ export function HomePage() {
               <p className="mt-4 text-[16px] leading-[1.75] text-text-secondary">
                 Every booking produces a printed ticket stub — ink panel, dashed
                 tear-line, barcode. The kind of thing you'd find folded in a
-                jacket pocket years later and remember exactly where you stood.
+                jacket pocket years later and remember exactly which screening
+                you sat in.
               </p>
               <p className="mt-3 text-[16px] leading-[1.75] text-text-secondary">
                 One stub per seat. Section, row, price, and a serial number tied
@@ -263,28 +269,28 @@ export function HomePage() {
                 className="mt-7"
                 variant="secondary"
                 size="md"
-                onClick={() => navigate('/events')}
+                onClick={() => navigate('/films')}
               >
-                Find a show to book
+                Find a film to book
               </Button>
             </div>
 
             {/* Stacked stubs */}
-            {eventsState.status === 'success' && (
+            {filmsState.status === 'success' && (
               <div className="relative flex flex-col gap-3 lg:pl-6">
-                {featuredEvents.map((evt, i) => (
+                {featuredFilms.map((film, i) => (
                   <div
-                    key={evt.id}
+                    key={film.id}
                     className="transition-transform duration-200 hover:-translate-y-1"
                     style={{ zIndex: 3 - i }}
                   >
                     <TicketStub
                       variant="compact"
-                      eyebrow={formatStubDate(evt.date)}
-                      title={evt.artist}
-                      subtitle={`${evt.venue.name} · ${evt.venue.city}`}
-                      serial={`ENC-${evt.id.slice(-4).toUpperCase()}`}
-                      onClick={() => navigate(`/events/${evt.id}`)}
+                      eyebrow={film.certificate}
+                      title={film.title}
+                      subtitle={runtimeLabel(film.runtimeMinutes)}
+                      serial={`FLM-${film.id.slice(-4).toUpperCase()}`}
+                      onClick={() => navigate(`/films/${film.id}`)}
                     />
                   </div>
                 ))}
@@ -308,9 +314,9 @@ export function HomePage() {
             <Button
               size="lg"
               className="bg-stamp-red text-ticket-paper hover:bg-stamp-red/90"
-              onClick={() => navigate('/events')}
+              onClick={() => navigate('/films')}
             >
-              Browse concerts
+              Browse films
               <ArrowRight className="size-4" />
             </Button>
             <Button
@@ -323,12 +329,12 @@ export function HomePage() {
             </Button>
           </div>
 
-          {/* Venue list */}
-          {venues.length > 0 && (
+          {/* Cinema list */}
+          {cinemas.length > 0 && (
             <div className="mt-12 flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-              {venues.map((v) => (
-                <span key={v.id} className="font-mono text-[11px] text-ticket-paper/30 uppercase tracking-wider">
-                  {v.name} · {v.city}
+              {cinemas.map((c) => (
+                <span key={c.id} className="font-mono text-[11px] text-ticket-paper/30 uppercase tracking-wider">
+                  {c.name} · {c.city}
                 </span>
               ))}
             </div>
