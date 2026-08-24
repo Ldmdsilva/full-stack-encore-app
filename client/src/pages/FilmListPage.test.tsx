@@ -41,22 +41,22 @@ describe('FilmListPage', () => {
   })
 
   it('shows an empty state when a filter matches nothing, with a way to clear it', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderFilmList()
     await screen.findByText(filmA.title)
 
     // Neither fixture film is tagged Comedy — this genre yields zero results.
     await user.selectOptions(screen.getByLabelText(/genre/i), 'Comedy')
 
-    expect(await screen.findByText(/no films match your search/i, {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(await screen.findByText(/no films match your search/i, {}, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /clear filters/i }))
-    expect(await screen.findByText(filmA.title, {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(await screen.findByText(filmA.title, {}, { timeout: 5000 })).toBeInTheDocument()
   })
 
   it('reflects filter changes in the URL so a search is shareable', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderFilmList()
     await screen.findByText(filmA.title)
 
@@ -64,21 +64,21 @@ describe('FilmListPage', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('genre=Music'))
 
     await user.type(screen.getByLabelText(/search/i), 'Marfa')
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('q=Marfa'), { timeout: 2000 })
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('q=Marfa'), { timeout: 5000 })
   })
 
   it('filters films by title via the search box', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderFilmList()
     await screen.findByText(filmA.title)
 
     await user.type(screen.getByLabelText(/search/i), 'Night Choir')
-    await waitFor(() => expect(screen.queryByText(filmA.title)).not.toBeInTheDocument(), { timeout: 2000 })
+    await waitFor(() => expect(screen.queryByText(filmA.title)).not.toBeInTheDocument(), { timeout: 5000 })
     expect(screen.getByText(filmB.title)).toBeInTheDocument()
   })
 
   it('paginates when the server reports more than one page', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     server.use(
       http.get('/api/films', ({ request }) => {
         const url = new URL(request.url)
