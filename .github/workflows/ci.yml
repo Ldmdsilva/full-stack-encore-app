@@ -11,6 +11,7 @@ env:
   MONGODB_URI: ${{ secrets.MONGODB_URI }}
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
   NODE_ENV: test
+  STRIPE_PUBLISHABLE_KEY: pk_test_mock_key
 
 jobs:
   install:
