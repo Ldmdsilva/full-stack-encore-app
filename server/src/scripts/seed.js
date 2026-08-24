@@ -188,18 +188,18 @@ const FILMS = [
 // ---------------------------------------------------------------------------
 
 const SHOWTIME_PLAN = [
-  { filmTitle: 'The Last Ember', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 1, hour: 14, basePrice: 100000 },
-  { filmTitle: 'The Last Ember', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 4, hour: 19, minute: 30, basePrice: 110000 },
-  { filmTitle: 'Midnight Circuit', cinemaName: 'Liberty Cineplex', screenId: '2', daysFromNow: 1, hour: 20, basePrice: 105000 },
-  { filmTitle: 'Midnight Circuit', cinemaName: 'Liberty Cineplex', screenId: '2', daysFromNow: 6, hour: 21, minute: 15, basePrice: 105000 },
-  { filmTitle: 'Midnight Circuit', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 13, hour: 21, basePrice: 105000 },
-  { filmTitle: 'Whiskers & Co.', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 2, hour: 11, basePrice: 85000 },
-  { filmTitle: 'Whiskers & Co.', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 3, hour: 10, minute: 30, basePrice: 80000 },
-  { filmTitle: 'Silent Tide', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 5, hour: 20, minute: 30, basePrice: 95000 },
-  { filmTitle: 'Silent Tide', cinemaName: 'Liberty Cineplex', screenId: '2', daysFromNow: 8, hour: 22, basePrice: 95000 },
-  { filmTitle: 'Comet Season', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 2, hour: 17, basePrice: 90000 },
-  { filmTitle: 'Comet Season', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 9, hour: 16, minute: 30, basePrice: 90000 },
-  { filmTitle: 'Comet Season', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 12, hour: 19, basePrice: 90000 },
+  { filmTitle: 'The Last Ember', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 1, hour: 14, basePrice: 300000 },
+  { filmTitle: 'The Last Ember', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 4, hour: 19, minute: 30, basePrice: 1500000 },
+  { filmTitle: 'Midnight Circuit', cinemaName: 'Liberty Cineplex', screenId: '2', daysFromNow: 1, hour: 20, basePrice: 1200000 },
+  { filmTitle: 'Midnight Circuit', cinemaName: 'Liberty Cineplex', screenId: '2', daysFromNow: 6, hour: 21, minute: 15, basePrice: 1000000 },
+  { filmTitle: 'Midnight Circuit', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 13, hour: 21, basePrice: 900000 },
+  { filmTitle: 'Whiskers & Co.', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 2, hour: 11, basePrice: 500000 },
+  { filmTitle: 'Whiskers & Co.', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 3, hour: 10, minute: 30, basePrice: 400000 },
+  { filmTitle: 'Silent Tide', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 5, hour: 20, minute: 30, basePrice: 600000 },
+  { filmTitle: 'Silent Tide', cinemaName: 'Liberty Cineplex', screenId: '2', daysFromNow: 8, hour: 22, basePrice: 750000 },
+  { filmTitle: 'Comet Season', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 2, hour: 17, basePrice: 800000 },
+  { filmTitle: 'Comet Season', cinemaName: 'Liberty Cineplex', screenId: '1', daysFromNow: 9, hour: 16, minute: 30, basePrice: 1400000 },
+  { filmTitle: 'Comet Season', cinemaName: 'Hilltop Cinema', screenId: '1', daysFromNow: 12, hour: 19, basePrice: 1100000 },
 ];
 
 // ---------------------------------------------------------------------------

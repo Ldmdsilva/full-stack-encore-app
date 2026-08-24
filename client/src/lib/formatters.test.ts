@@ -4,12 +4,12 @@ import type { ShowtimeSeat } from './types'
 
 describe('formatPrice', () => {
   it('formats a number as grouped LKR with two decimals', () => {
-    expect(formatPrice(6500)).toBe('Rs 6,500.00')
+    expect(formatPrice(650000)).toBe('Rs 6,500.00')
   })
 
   it('handles zero and fractional amounts', () => {
     expect(formatPrice(0)).toBe('Rs 0.00')
-    expect(formatPrice(1234.5)).toBe('Rs 1,234.50')
+    expect(formatPrice(123450)).toBe('Rs 1,234.50')
   })
 })
 
