@@ -45,7 +45,7 @@ describe('LoginPage', () => {
     expect(await screen.findByText(/enter a valid sri lankan mobile number/i)).toBeInTheDocument()
   })
 
-  it('accepts a valid Sri Lankan mobile number and registers successfully', async () => {
+  it('accepts a valid Sri Lankan mobile number and shows a verify-your-email confirmation, without logging in', async () => {
     const user = userEvent.setup()
     renderRoutes(
       [
@@ -62,7 +62,20 @@ describe('LoginPage', () => {
     await user.type(screen.getByLabelText(/confirm password/i), 'password123')
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
-    await waitFor(() => expect(screen.getByText('destination')).toBeInTheDocument())
+    // D14 — register never logs the user in, so it never navigates to
+    // `from`; it shows an inline confirmation instead.
+    expect(await screen.findByRole('heading', { name: /check your email/i })).toBeInTheDocument()
+    expect(screen.queryByText('destination')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/full name/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /go to sign in/i }))
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/confirm password/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a Forgot password link on the sign-in form pointing at /forgot-password', () => {
+    renderPage(<LoginPage />, '/login')
+    expect(screen.getByRole('link', { name: /forgot password/i })).toHaveAttribute('href', '/forgot-password')
   })
 
   it('shows a generic message on invalid credentials, never revealing whether the account exists', async () => {

@@ -5,6 +5,15 @@ import { logger } from '../../config/logger.js';
 let transporterPromise = null;
 
 /**
+ * Dev/test convenience only: the most recent email sent to each recipient,
+ * kept in memory for the process lifetime so local dev and e2e tests can
+ * read a verification/reset link without a real mailbox (there's no live
+ * SMTP in dev — it's either Ethereal or, under Jest, `jsonTransport`).
+ * Never persisted; not a substitute for a real mail log.
+ */
+const lastMailByRecipient = new Map(); // key: lowercased email, value: { to, subject, html, text, sentAt }
+
+/**
  * Lazily build (and memoise) the nodemailer transport: `jsonTransport` in
  * tests (nothing leaves the process), the configured SMTP host in
  * development/production, or an auto-created Ethereal account as a
@@ -56,6 +65,8 @@ export async function sendEmail({ to, subject, html, text }) {
     const transporter = await getTransporter();
     const info = await transporter.sendMail({ from: env.MAIL_FROM, to, subject, html, text });
 
+    lastMailByRecipient.set(to.toLowerCase().trim(), { to, subject, html, text, sentAt: new Date() });
+
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) {
       logger.info({ previewUrl }, '[Email] Preview URL');
@@ -66,4 +77,15 @@ export async function sendEmail({ to, subject, html, text }) {
     logger.error({ err: error, to, subject }, '[Email] Send failed');
     return undefined;
   }
+}
+
+/**
+ * Dev/test only: retrieve the last email sent to a given address, so local
+ * dev and e2e tests can read a verification/reset link without a real
+ * mailbox. In-memory only — never call this in production code paths.
+ * @param {string} to
+ * @returns {{ to: string, subject: string, html: string, text: string, sentAt: Date }|null}
+ */
+export function getLastMail(to) {
+  return lastMailByRecipient.get(to.toLowerCase().trim()) ?? null;
 }

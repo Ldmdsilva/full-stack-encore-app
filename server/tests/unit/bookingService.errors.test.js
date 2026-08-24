@@ -1,39 +1,80 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, jest } from '@jest/globals';
+import mongoose from 'mongoose';
 import { connectTestDB, clearTestDB, closeTestDB } from '../helpers/db.js';
 import { createStripeMock, mockStripeModule } from '../helpers/mocks.js';
-import Event from '../../src/models/Event.js';
-import Venue from '../../src/models/Venue.js';
+import { setIO } from '../../src/config/socket.js';
+import Showtime from '../../src/models/Showtime.js';
 import Booking from '../../src/models/Booking.js';
 import User from '../../src/models/User.js';
 
-// Stripe must be mocked before the dynamic import of bookingService.js below.
+// Stripe must be mocked before the dynamic import of bookingService.js below
+// — a confirmed booking's cancellation refunds via paymentService.
 const stripeMock = createStripeMock();
 mockStripeModule(stripeMock);
 
 let bookingService;
 
-async function seedVenueAndUser() {
-  const venue = await Venue.create({
-    name: 'Coverage Hall',
-    address: '1 Coverage Ave',
-    city: 'Colombo',
-    seatLayout: [
-      { id: 'A-1', section: 'Main', row: 'A', number: 1 },
-      { id: 'A-2', section: 'Main', row: 'A', number: 2 },
-    ],
-    capacity: 2,
-  });
-  const user = await User.create({
-    name: 'Coverage User',
-    email: 'coverage@test.com',
-    passwordHash: 'hash',
-    phone: '94771234567',
-    role: 'customer',
-  });
-  return { venue, user };
+function createFakeIO() {
+  const emit = jest.fn();
+  const to = jest.fn(() => ({ emit }));
+  return { to, emit };
 }
 
-describe('services/bookingService.js — error paths and guards (raises branch coverage)', () => {
+function seatFixture(overrides = {}) {
+  return {
+    id: 'A-1',
+    section: 'STANDARD',
+    row: 'A',
+    number: 1,
+    tier: 'STANDARD',
+    price: 1000,
+    status: 'booked',
+    ...overrides,
+  };
+}
+
+async function createShowtime(overrides = {}) {
+  return Showtime.create({
+    filmRef: new mongoose.Types.ObjectId(),
+    cinemaRef: new mongoose.Types.ObjectId(),
+    screenId: '1',
+    screenName: 'Screen 1',
+    startsAt: new Date(Date.now() + 86400000),
+    basePrice: 1000,
+    status: 'scheduled',
+    seats: [seatFixture()],
+    ...overrides,
+  });
+}
+
+async function createUser(overrides = {}) {
+  return User.create({
+    name: 'Coverage User',
+    email: `coverage${Math.random().toString(36).slice(2)}@test.com`,
+    passwordHash: 'hash',
+    phone: `9477${Math.floor(1000000 + Math.random() * 8999999)}`,
+    role: 'customer',
+    ...overrides,
+  });
+}
+
+async function createConfirmedBooking({ user, showtime, paymentIntentId } = {}) {
+  return Booking.create({
+    reference: `ENC-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+    userRef: user._id,
+    showtimeRef: showtime._id,
+    holdRef: new mongoose.Types.ObjectId(),
+    paymentIntentId: paymentIntentId || `pi_${Math.random().toString(36).slice(2, 10)}`,
+    paymentStatus: 'succeeded',
+    seats: [{ id: 'A-1', section: 'STANDARD', row: 'A', number: 1, price: 1000 }],
+    totalPrice: 1000,
+    status: 'confirmed',
+  });
+}
+
+describe('services/bookingService.js — Showtime-based cancelBooking/getBookingById (raises branch coverage)', () => {
+  let fakeIO;
+
   beforeAll(async () => {
     await connectTestDB();
     bookingService = await import('../../src/services/bookingService.js');
@@ -46,270 +87,73 @@ describe('services/bookingService.js — error paths and guards (raises branch c
   beforeEach(async () => {
     await clearTestDB();
     jest.clearAllMocks();
-    stripeMock.checkout.sessions.create.mockImplementation(async () => ({
-      id: `cs_test_${Math.random().toString(36).slice(2)}`,
-      client_secret: `secret_${Math.random().toString(36).slice(2)}`,
-      status: 'open',
-      amount_total: 5000,
-      currency: 'lkr',
-    }));
-  });
-
-  describe('createBooking validation', () => {
-    it('rejects a missing eventId/seatIds with 400 VALIDATION_ERROR', async () => {
-      const { user } = await seedVenueAndUser();
-      await expect(
-        bookingService.createBooking({ userId: user._id.toString(), eventId: null, seatIds: [] })
-      ).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
-    });
-
-    it('rejects a non-existent event with 404 EVENT_NOT_FOUND', async () => {
-      const { user } = await seedVenueAndUser();
-      await expect(
-        bookingService.createBooking({
-          userId: user._id.toString(),
-          eventId: '64b64b64b64b64b64b64b64b',
-          seatIds: ['A-1'],
-        })
-      ).rejects.toMatchObject({ statusCode: 404, code: 'EVENT_NOT_FOUND' });
-    });
-
-    it('rejects booking on a cancelled event with 400 EVENT_INACTIVE', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Cancelled Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'cancelled',
-      });
-
-      await expect(
-        bookingService.createBooking({ userId: user._id.toString(), eventId: event._id.toString(), seatIds: ['A-1'] })
-      ).rejects.toMatchObject({ statusCode: 400, code: 'EVENT_INACTIVE' });
-    });
-
-    it('rejects seat ids that do not exist on the event with 400 INVALID_SEATS', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Valid Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-
-      await expect(
-        bookingService.createBooking({
-          userId: user._id.toString(),
-          eventId: event._id.toString(),
-          seatIds: ['Z-99'],
-        })
-      ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_SEATS' });
-    });
-  });
-
-  describe('createBooking Booking.create failure handling', () => {
-    it('rolls back the seat hold and rethrows on a non-duplicate-key Booking.create failure', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Create-Failure Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-
-      const createSpy = jest.spyOn(Booking, 'create').mockRejectedValueOnce(new Error('unexpected db error'));
-
-      await expect(
-        bookingService.createBooking({ userId: user._id.toString(), eventId: event._id.toString(), seatIds: ['A-1'] })
-      ).rejects.toThrow('unexpected db error');
-
-      createSpy.mockRestore();
-
-      const updatedEvent = await Event.findById(event._id);
-      expect(updatedEvent.seats[0].status).toBe('available');
-
-      const count = await Booking.countDocuments({ eventRef: event._id });
-      expect(count).toBe(0);
-    });
-
-    it('retries once with a regenerated reference on a duplicate-key (E11000) collision', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Duplicate-Reference Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-
-      const duplicateKeyError = Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
-      const createSpy = jest.spyOn(Booking, 'create').mockRejectedValueOnce(duplicateKeyError);
-
-      const { booking } = await bookingService.createBooking({
-        userId: user._id.toString(),
-        eventId: event._id.toString(),
-        seatIds: ['A-1'],
-      });
-
-      createSpy.mockRestore();
-
-      expect(booking.status).toBe('pending');
-      const count = await Booking.countDocuments({ eventRef: event._id });
-      expect(count).toBe(1);
-    });
+    fakeIO = createFakeIO();
+    setIO(fakeIO);
   });
 
   describe('cancelBooking guards', () => {
     it('rejects cancelling a non-existent booking with 404 BOOKING_NOT_FOUND', async () => {
-      const { user } = await seedVenueAndUser();
+      const user = await createUser();
       await expect(
-        bookingService.cancelBooking({ userId: user._id.toString(), bookingId: '64b64b64b64b64b64b64b64b', role: 'customer' })
+        bookingService.cancelBooking({
+          userId: user._id.toString(),
+          bookingId: new mongoose.Types.ObjectId().toString(),
+          role: 'customer',
+        })
       ).rejects.toMatchObject({ statusCode: 404, code: 'BOOKING_NOT_FOUND' });
     });
 
     it('rejects cancelling another customer\'s booking with 403 FORBIDDEN', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const otherUser = await User.create({
-        name: 'Other User',
-        email: 'other@test.com',
-        passwordHash: 'hash',
-        phone: '94771234568',
-        role: 'customer',
-      });
-      const event = await Event.create({
-        title: 'Forbidden Cancel Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-      const { booking } = await bookingService.createBooking({
-        userId: user._id.toString(),
-        eventId: event._id.toString(),
-        seatIds: ['A-1'],
-      });
+      const user = await createUser();
+      const otherUser = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime });
 
       await expect(
-        bookingService.cancelBooking({ userId: otherUser._id.toString(), bookingId: booking._id.toString(), role: 'customer' })
+        bookingService.cancelBooking({
+          userId: otherUser._id.toString(),
+          bookingId: booking._id.toString(),
+          role: 'customer',
+        })
       ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
     });
 
     it('is idempotent: cancelling an already-cancelled booking just returns it', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Idempotent Cancel Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-      const { booking } = await bookingService.createBooking({
+      const user = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime });
+      booking.status = 'cancelled';
+      await booking.save();
+
+      const result = await bookingService.cancelBooking({
         userId: user._id.toString(),
-        eventId: event._id.toString(),
-        seatIds: ['A-1'],
+        bookingId: booking._id.toString(),
+        role: 'customer',
       });
-
-      const first = await bookingService.cancelBooking({ userId: user._id.toString(), bookingId: booking._id.toString(), role: 'customer' });
-      expect(first.status).toBe('cancelled');
-
-      const second = await bookingService.cancelBooking({ userId: user._id.toString(), bookingId: booking._id.toString(), role: 'customer' });
-      expect(second.status).toBe('cancelled');
+      expect(result.status).toBe('cancelled');
     });
 
-    it('rejects cancelling an expired booking with 400 BOOKING_NOT_CANCELLABLE', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Expired Booking Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-      const expiredBooking = await Booking.create({
-        reference: 'ENC-ALREADY-EXPIRED',
-        userRef: user._id,
-        eventRef: event._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
-        totalPrice: 50,
-        status: 'expired',
-      });
+    it('rejects cancelling a booking for a showtime that has already started with 400 SHOWTIME_STARTED', async () => {
+      const user = await createUser();
+      const pastShowtime = await createShowtime({ startsAt: new Date(Date.now() - 3600000) });
+      const booking = await createConfirmedBooking({ user, showtime: pastShowtime });
 
       await expect(
-        bookingService.cancelBooking({ userId: user._id.toString(), bookingId: expiredBooking._id.toString(), role: 'customer' })
-      ).rejects.toMatchObject({ statusCode: 400, code: 'BOOKING_NOT_CANCELLABLE' });
-    });
-
-    it('rejects cancelling a booking for an event that has already started with 400 EVENT_STARTED', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const pastEvent = await Event.create({
-        title: 'Already Started Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() - 3600000), // started an hour ago
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'held', price: 50 }],
-        status: 'scheduled',
-      });
-      const pendingBooking = await Booking.create({
-        reference: 'ENC-STARTED-EVENT',
-        userRef: user._id,
-        eventRef: pastEvent._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
-        totalPrice: 50,
-        status: 'pending',
-        holdExpiresAt: new Date(Date.now() + 60000),
-      });
-
-      await expect(
-        bookingService.cancelBooking({ userId: user._id.toString(), bookingId: pendingBooking._id.toString(), role: 'customer' })
-      ).rejects.toMatchObject({ statusCode: 400, code: 'EVENT_STARTED' });
+        bookingService.cancelBooking({
+          userId: user._id.toString(),
+          bookingId: booking._id.toString(),
+          role: 'customer',
+        })
+      ).rejects.toMatchObject({ statusCode: 400, code: 'SHOWTIME_STARTED' });
     });
 
     it('an admin may cancel any customer\'s booking regardless of ownership', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Admin Cancel Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-      const { booking } = await bookingService.createBooking({
-        userId: user._id.toString(),
-        eventId: event._id.toString(),
-        seatIds: ['A-1'],
-      });
+      const user = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime });
 
       const cancelled = await bookingService.cancelBooking({
-        userId: '64b64b64b64b64b64b64b64b', // not the owner
+        userId: new mongoose.Types.ObjectId().toString(), // not the owner
         bookingId: booking._id.toString(),
         role: 'admin',
       });
@@ -317,103 +161,94 @@ describe('services/bookingService.js — error paths and guards (raises branch c
       expect(cancelled.status).toBe('cancelled');
     });
 
-    it('refunds via Stripe before flipping a confirmed booking to cancelled', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'Refund Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'booked', price: 50 }],
-        status: 'scheduled',
-      });
-      const confirmedBooking = await Booking.create({
-        reference: 'ENC-CONFIRMED-CANCEL',
-        userRef: user._id,
-        eventRef: event._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
-        totalPrice: 50,
-        status: 'confirmed',
-        payment: { provider: 'stripe', paymentIntentId: 'pi_refund_test' },
-      });
+    it('releases the booking\'s seats back to available and broadcasts via the showtime room', async () => {
+      const user = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime });
 
       const cancelled = await bookingService.cancelBooking({
         userId: user._id.toString(),
-        bookingId: confirmedBooking._id.toString(),
+        bookingId: booking._id.toString(),
         role: 'customer',
       });
 
       expect(cancelled.status).toBe('cancelled');
-      expect(cancelled.payment.refundId).toBe('re_test_mock_refund');
+
+      const updatedShowtime = await Showtime.findById(showtime._id);
+      expect(updatedShowtime.seats[0].status).toBe('available');
+
+      expect(fakeIO.to).toHaveBeenCalledWith(`showtime:${showtime._id.toString()}`);
+      expect(fakeIO.emit).toHaveBeenCalledWith('seats:updated', {
+        showtimeId: showtime._id.toString(),
+        seatIds: ['A-1'],
+        status: 'available',
+      });
+    });
+
+    it('refunds via the new top-level paymentIntentId before flipping a confirmed booking to cancelled', async () => {
+      const user = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime, paymentIntentId: 'pi_refund_test' });
+
+      const cancelled = await bookingService.cancelBooking({
+        userId: user._id.toString(),
+        bookingId: booking._id.toString(),
+        role: 'customer',
+      });
+
+      expect(cancelled.status).toBe('cancelled');
       expect(stripeMock.refunds.create).toHaveBeenCalledWith({ payment_intent: 'pi_refund_test' });
 
-      const updatedEvent = await Event.findById(event._id);
-      expect(updatedEvent.seats[0].status).toBe('available');
+      const updatedShowtime = await Showtime.findById(showtime._id);
+      expect(updatedShowtime.seats[0].status).toBe('available');
     });
   });
 
   describe('getBookingById', () => {
     it('rejects a non-existent booking with 404 BOOKING_NOT_FOUND', async () => {
-      const { user } = await seedVenueAndUser();
+      const user = await createUser();
       await expect(
-        bookingService.getBookingById({ bookingId: '64b64b64b64b64b64b64b64b', userId: user._id.toString(), role: 'customer' })
+        bookingService.getBookingById({
+          bookingId: new mongoose.Types.ObjectId().toString(),
+          userId: user._id.toString(),
+          role: 'customer',
+        })
       ).rejects.toMatchObject({ statusCode: 404, code: 'BOOKING_NOT_FOUND' });
     });
 
     it('rejects a customer viewing another customer\'s booking with 403 FORBIDDEN', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const otherUser = await User.create({
-        name: 'Viewer User',
-        email: 'viewer@test.com',
-        passwordHash: 'hash',
-        phone: '94771234569',
-        role: 'customer',
-      });
-      const event = await Event.create({
-        title: 'View Guard Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-      const { booking } = await bookingService.createBooking({
-        userId: user._id.toString(),
-        eventId: event._id.toString(),
-        seatIds: ['A-1'],
-      });
+      const user = await createUser();
+      const otherUser = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime });
 
       await expect(
-        bookingService.getBookingById({ bookingId: booking._id.toString(), userId: otherUser._id.toString(), role: 'customer' })
+        bookingService.getBookingById({
+          bookingId: booking._id.toString(),
+          userId: otherUser._id.toString(),
+          role: 'customer',
+        })
       ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
     });
 
-    it('allows the owner and an admin to view the booking', async () => {
-      const { venue, user } = await seedVenueAndUser();
-      const event = await Event.create({
-        title: 'View Allowed Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
-        basePrice: 50,
-        venueRef: venue._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'available', price: 50 }],
-        status: 'scheduled',
-      });
-      const { booking } = await bookingService.createBooking({
+    it('allows the owner and an admin to view the booking, with the showtime populated', async () => {
+      const user = await createUser();
+      const showtime = await createShowtime();
+      const booking = await createConfirmedBooking({ user, showtime });
+
+      const asOwner = await bookingService.getBookingById({
+        bookingId: booking._id.toString(),
         userId: user._id.toString(),
-        eventId: event._id.toString(),
-        seatIds: ['A-1'],
+        role: 'customer',
       });
-
-      const asOwner = await bookingService.getBookingById({ bookingId: booking._id.toString(), userId: user._id.toString(), role: 'customer' });
       expect(asOwner.reference).toBe(booking.reference);
+      expect(asOwner.showtimeRef.screenName).toBe('Screen 1');
 
-      const asAdmin = await bookingService.getBookingById({ bookingId: booking._id.toString(), userId: '64b64b64b64b64b64b64b64b', role: 'admin' });
+      const asAdmin = await bookingService.getBookingById({
+        bookingId: booking._id.toString(),
+        userId: new mongoose.Types.ObjectId().toString(),
+        role: 'admin',
+      });
       expect(asAdmin.reference).toBe(booking.reference);
     });
   });

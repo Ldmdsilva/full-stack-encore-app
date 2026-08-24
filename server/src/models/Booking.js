@@ -30,34 +30,6 @@ const bookedSeatSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const paymentSchema = new mongoose.Schema(
-  {
-    provider: {
-      type: String,
-      default: 'stripe',
-    },
-    sessionId: {
-      type: String,
-    },
-    paymentIntentId: {
-      type: String,
-    },
-    status: {
-      type: String,
-    },
-    amountMinor: {
-      type: Number,
-    },
-    currency: {
-      type: String,
-    },
-    refundId: {
-      type: String,
-    },
-  },
-  { _id: false }
-);
-
 const bookingSchema = new mongoose.Schema(
   {
     reference: {
@@ -71,10 +43,31 @@ const bookingSchema = new mongoose.Schema(
       ref: 'User',
       required: [true, 'User reference is required'],
     },
-    eventRef: {
+    showtimeRef: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Event',
-      required: [true, 'Event reference is required'],
+      ref: 'Showtime',
+      required: [true, 'Showtime reference is required'],
+    },
+    holdRef: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Hold',
+      required: [true, 'Hold reference is required'],
+      unique: true,
+    },
+    paymentIntentId: {
+      type: String,
+      required: [true, 'Payment intent id is required'],
+      unique: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'succeeded', 'failed', 'refunded'],
+      required: [true, 'Payment status is required'],
+    },
+    // Denormalised from Showtime.screenName so a booking's ticket can show
+    // its screen without populating Cinema.screens.
+    screenName: {
+      type: String,
     },
     seats: {
       type: [bookedSeatSchema],
@@ -93,15 +86,8 @@ const bookingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'confirmed', 'cancelled', 'expired'],
-      default: 'pending',
-    },
-    holdExpiresAt: {
-      type: Date,
-    },
-    payment: {
-      type: paymentSchema,
-      default: () => ({}),
+      enum: ['confirmed', 'cancelled'],
+      default: 'confirmed',
     },
     createdAt: {
       type: Date,
@@ -121,8 +107,7 @@ const bookingSchema = new mongoose.Schema(
 
 // Indexes (§C6.3)
 bookingSchema.index({ userRef: 1, createdAt: -1 });
-bookingSchema.index({ eventRef: 1 });
-bookingSchema.index({ status: 1, holdExpiresAt: 1 });
+bookingSchema.index({ showtimeRef: 1 });
 
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;

@@ -55,8 +55,63 @@ describe('apiClient response interceptor', () => {
     expect(getToken()).toBeNull()
   })
 
+  it('clears the token on a 401 regardless of which code the server used', async () => {
+    // The logout trigger is keyed on HTTP status, not `code` — a 401 from
+    // TOKEN_REVOKED (or any other code) must log the user out just the same
+    // as a plain UNAUTHORIZED.
+    window.history.pushState({}, '', '/login')
+    setToken('some-token')
+    server.use(http.get('/api/health', () => HttpResponse.json({ error: { code: 'TOKEN_REVOKED', message: 'nope' } }, { status: 401 })))
+
+    await expect(apiClient.get('/health')).rejects.toMatchObject({ code: 'TOKEN_REVOKED' })
+
+    expect(getToken()).toBeNull()
+  })
+
+  it('does NOT clear the token on a 400 TOKEN_EXPIRED/INVALID_TOKEN response (expired verify/reset link)', async () => {
+    // Regression test for the code/status collision bug: TOKEN_EXPIRED and
+    // INVALID_TOKEN are also the exact codes the server returns for an
+    // expired or garbage email-verification/password-reset link, which come
+    // back as 400, not 401. A user clicking such a link while they have an
+    // active session must NOT be logged out by this interceptor.
+    window.history.pushState({}, '', '/verify-email')
+    setToken('an-active-session-token')
+    server.use(
+      http.post('/api/auth/verify-email', () =>
+        HttpResponse.json({ error: { code: 'TOKEN_EXPIRED', message: 'This link has expired.' } }, { status: 400 }),
+      ),
+    )
+
+    await expect(apiClient.post('/auth/verify-email', { token: 'stale' })).rejects.toMatchObject({
+      code: 'TOKEN_EXPIRED',
+      status: 400,
+    })
+
+    expect(getToken()).toBe('an-active-session-token')
+
+    setToken(null)
+    server.use(
+      http.post('/api/auth/reset-password', () =>
+        HttpResponse.json({ error: { code: 'INVALID_TOKEN', message: 'This link is invalid.' } }, { status: 400 }),
+      ),
+    )
+    setToken('another-active-session-token')
+
+    await expect(apiClient.post('/auth/reset-password', { token: 'bad', password: 'x' })).rejects.toMatchObject({
+      code: 'INVALID_TOKEN',
+      status: 400,
+    })
+
+    expect(getToken()).toBe('another-active-session-token')
+  })
+
   it('normalises every rejection into an ApiError shape', async () => {
     server.use(http.get('/api/health', () => HttpResponse.json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'oops' } }, { status: 500 })))
-    await expect(apiClient.get('/health')).rejects.toEqual({ code: 'INTERNAL_SERVER_ERROR', message: 'oops', details: undefined })
+    await expect(apiClient.get('/health')).rejects.toEqual({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'oops',
+      status: 500,
+      details: undefined,
+    })
   })
 })

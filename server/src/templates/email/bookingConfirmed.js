@@ -1,12 +1,12 @@
 import { emailLayout, ticketStubHtml } from './layout.js';
-import { formatLkr, formatEventDateTime } from '../../utils/currency.js';
+import { formatLkr, formatShowtimeDateTime } from '../../utils/currency.js';
 
 /**
  * @param {{ booking: object, event: object, venue: object }} params
  * @returns {{ subject: string, html: string, text: string }}
  */
 export function bookingConfirmedTemplate({ booking, event, venue }) {
-  const dateLabel = formatEventDateTime(event.date);
+  const dateLabel = formatShowtimeDateTime(event.date);
   const venueLabel = venue ? `${venue.name}, ${venue.city}` : '';
   const seatList = booking.seats.map((seat) => `${seat.section} ${seat.row}${seat.number}`).join(', ');
   const total = formatLkr(booking.totalPrice);

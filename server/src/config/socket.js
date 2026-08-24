@@ -46,3 +46,14 @@ export function getIO() {
   }
   return io;
 }
+
+/**
+ * Directly set the active Socket.IO server instance. Intended for tests that
+ * need to inject a fake/mock IO object (e.g. `{ to: () => ({ emit: jest.fn() }) }`)
+ * so `getIO()` returns it instead of throwing, letting assertions run against
+ * the fake's `emit` calls without a real running server.
+ * @param {import('socket.io').Server|object} ioInstance
+ */
+export function setIO(ioInstance) {
+  io = ioInstance;
+}

@@ -9,9 +9,9 @@ export async function getStats(req, res, next) {
   }
 }
 
-export async function listEvents(req, res, next) {
+export async function listShowtimes(req, res, next) {
   try {
-    const result = await adminService.listAdminEvents(req.query);
+    const result = await adminService.listAdminShowtimes(req.query);
     return res.status(200).json(result);
   } catch (error) {
     next(error);

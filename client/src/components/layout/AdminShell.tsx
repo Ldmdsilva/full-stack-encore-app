@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Ticket, LayoutDashboard, CalendarDays, BookOpen, MapPin, LogOut, ChevronRight } from 'lucide-react'
+import { Ticket, LayoutDashboard, CalendarDays, BookOpen, MapPin, Film, LogOut, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { cn } from '@/lib/utils'
 
@@ -41,17 +41,21 @@ function AdminSidebar() {
           <LayoutDashboard className="size-4 shrink-0" />
           Dashboard
         </NavLink>
-        <NavLink to="/admin/events" className={navItem}>
+        <NavLink to="/admin/films" className={navItem}>
+          <Film className="size-4 shrink-0" />
+          Films
+        </NavLink>
+        <NavLink to="/admin/showtimes" className={navItem}>
           <CalendarDays className="size-4 shrink-0" />
-          Events
+          Showtimes
         </NavLink>
         <NavLink to="/admin/bookings" className={navItem}>
           <BookOpen className="size-4 shrink-0" />
           Bookings
         </NavLink>
-        <NavLink to="/admin/venues" className={navItem}>
+        <NavLink to="/admin/cinemas" className={navItem}>
           <MapPin className="size-4 shrink-0" />
-          Venues
+          Cinemas
         </NavLink>
       </nav>
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseApiError } from './errors'
 import type { ApiError } from '../types'
 
-function axiosErrorLike(overrides: { response?: { data?: unknown } }) {
+function axiosErrorLike(overrides: { response?: { status?: number; data?: unknown } }) {
   return { isAxiosError: true, message: 'Request failed', ...overrides }
 }
 
@@ -20,9 +20,29 @@ describe('parseApiError', () => {
 
   it('prefers the server message when the body includes one', () => {
     const result = parseApiError(
-      axiosErrorLike({ response: { data: { error: { code: 'VALIDATION_ERROR', message: 'Name is required.' } } } }),
+      axiosErrorLike({
+        response: { status: 400, data: { error: { code: 'VALIDATION_ERROR', message: 'Name is required.' } } },
+      }),
     )
-    expect(result).toEqual({ code: 'VALIDATION_ERROR', message: 'Name is required.', details: undefined })
+    expect(result).toEqual({ code: 'VALIDATION_ERROR', message: 'Name is required.', status: 400, details: undefined })
+  })
+
+  it('populates `status` from the axios response status', () => {
+    const result = parseApiError(
+      axiosErrorLike({ response: { status: 401, data: { error: { code: 'UNAUTHORIZED', message: 'nope' } } } }),
+    )
+    expect(result.status).toBe(401)
+  })
+
+  it('populates `status` as 400 for a TOKEN_EXPIRED/INVALID_TOKEN response, not 401', () => {
+    // This is the crux of the client.ts bug fix: these codes are shared
+    // between the 401 "your session is dead" case and the 400 "this
+    // verify/reset link is stale" case — only `status` disambiguates them.
+    const result = parseApiError(
+      axiosErrorLike({ response: { status: 400, data: { error: { code: 'TOKEN_EXPIRED', message: 'expired link' } } } }),
+    )
+    expect(result.status).toBe(400)
+    expect(result.code).toBe('TOKEN_EXPIRED')
   })
 
   it('falls back to the known message for a code when the server omits one', () => {

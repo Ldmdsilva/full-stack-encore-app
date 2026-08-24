@@ -1,16 +1,16 @@
-import Event from '../models/Event.js';
+import Showtime from '../models/Showtime.js';
 import Booking from '../models/Booking.js';
-import { serializeEventSummary } from '../serializers/eventSerializer.js';
+import { serializeShowtimeSummary } from '../serializers/showtimeSerializer.js';
 
 /**
- * Aggregate dashboard statistics across all events and bookings (FR-25).
+ * Aggregate dashboard statistics across all showtimes and bookings (FR-25).
  * @returns {Promise<object>}
  */
 export async function getStats() {
-  const [totalEvents, upcomingEvents, totalBookings, confirmedBookings, cancelledBookings, revenueAgg, seatAgg] =
+  const [totalShowtimes, upcomingShowtimes, totalBookings, confirmedBookings, cancelledBookings, revenueAgg, seatAgg] =
     await Promise.all([
-      Event.countDocuments({}),
-      Event.countDocuments({ status: 'scheduled' }),
+      Showtime.countDocuments({}),
+      Showtime.countDocuments({ status: 'scheduled' }),
       Booking.countDocuments({}),
       Booking.countDocuments({ status: 'confirmed' }),
       Booking.countDocuments({ status: 'cancelled' }),
@@ -18,7 +18,7 @@ export async function getStats() {
         { $match: { status: 'confirmed' } },
         { $group: { _id: null, total: { $sum: '$totalPrice' } } },
       ]),
-      Event.aggregate([
+      Showtime.aggregate([
         {
           $project: {
             totalSeats: { $size: '$seats' },
@@ -38,8 +38,8 @@ export async function getStats() {
   const bookedSeats = seatAgg[0]?.bookedSeats || 0;
 
   return {
-    totalEvents,
-    upcomingEvents,
+    totalShowtimes,
+    upcomingShowtimes,
     totalBookings,
     confirmedBookings,
     cancelledBookings,
@@ -52,44 +52,48 @@ export async function getStats() {
 }
 
 /**
- * List every event (including cancelled and past) with revenue and booking
- * count derived from confirmed bookings, for the admin events table (FR-25).
+ * List every showtime (including cancelled and past) with revenue and
+ * booking count derived from confirmed bookings, for the admin showtimes
+ * table (FR-25). Never populates `cinemaRef.screens` — a listing must never
+ * drag up to 300 seats per screen over the wire (§C6.2).
  * @param {object} queryParams
- * @returns {Promise<{ events: Array, total: number, page: number, totalPages: number }>}
+ * @returns {Promise<{ items: Array, total: number, page: number, limit: number, totalPages: number }>}
  */
-export async function listAdminEvents(queryParams = {}) {
+export async function listAdminShowtimes(queryParams = {}) {
   const { page = 1, limit = 20 } = queryParams;
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const skip = (pageNum - 1) * limitNum;
 
-  const [events, total] = await Promise.all([
-    Event.find({})
-      .populate('venueRef', 'name address city capacity')
-      .sort({ date: -1 })
+  const [showtimes, total] = await Promise.all([
+    Showtime.find({})
+      .populate('filmRef', 'title posterUrl')
+      .populate('cinemaRef', 'name city')
+      .sort({ startsAt: -1 })
       .skip(skip)
       .limit(limitNum),
-    Event.countDocuments({}),
+    Showtime.countDocuments({}),
   ]);
 
-  const eventIds = events.map((event) => event._id);
-  const revenueByEvent = await Booking.aggregate([
-    { $match: { eventRef: { $in: eventIds }, status: 'confirmed' } },
-    { $group: { _id: '$eventRef', revenue: { $sum: '$totalPrice' }, bookingCount: { $sum: 1 } } },
+  const showtimeIds = showtimes.map((showtime) => showtime._id);
+  const revenueByShowtime = await Booking.aggregate([
+    { $match: { showtimeRef: { $in: showtimeIds }, status: 'confirmed' } },
+    { $group: { _id: '$showtimeRef', revenue: { $sum: '$totalPrice' }, bookingCount: { $sum: 1 } } },
   ]);
-  const statsByEventId = new Map(revenueByEvent.map((row) => [row._id.toString(), row]));
+  const statsByShowtimeId = new Map(revenueByShowtime.map((row) => [row._id.toString(), row]));
 
   return {
-    events: events.map((event) => {
-      const stats = statsByEventId.get(event._id.toString());
+    items: showtimes.map((showtime) => {
+      const stats = statsByShowtimeId.get(showtime._id.toString());
       return {
-        ...serializeEventSummary(event),
+        ...serializeShowtimeSummary(showtime),
         revenue: stats?.revenue || 0,
         bookingCount: stats?.bookingCount || 0,
       };
     }),
     total,
     page: pageNum,
+    limit: limitNum,
     totalPages: Math.ceil(total / limitNum),
   };
 }

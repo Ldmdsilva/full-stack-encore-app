@@ -64,7 +64,7 @@ function KpiCard({
 }
 
 function BookingStatusBadge({ status }: { status: BookingStatus }) {
-  const variant = status === 'confirmed' ? 'confirmed' : status === 'pending' ? 'pending' : status === 'expired' ? 'expired' : 'cancelled'
+  const variant = status === 'confirmed' ? 'confirmed' : 'cancelled'
   const label = status.charAt(0).toUpperCase() + status.slice(1)
   return <Badge variant={variant}>{label}</Badge>
 }
@@ -72,16 +72,16 @@ function BookingStatusBadge({ status }: { status: BookingStatus }) {
 export function AdminDashboard() {
   const statsState = useAsync(() => adminApi.stats(), [])
   const bookingsState = useAsync(() => bookingsApi.listAll({ limit: 8 }), [], {
-    isEmpty: (d) => d.bookings.length === 0,
+    isEmpty: (d) => d.items.length === 0,
   })
-  const eventsState = useAsync(() => adminApi.listEvents({ limit: 50 }), [], {
-    isEmpty: (d) => d.events.length === 0,
+  const showtimesState = useAsync(() => adminApi.listShowtimes({ limit: 50 }), [], {
+    isEmpty: (d) => d.items.length === 0,
   })
 
-  const recentBookings = bookingsState.status === 'success' ? bookingsState.data.bookings : []
-  const topEvents =
-    eventsState.status === 'success'
-      ? [...eventsState.data.events].sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 4)
+  const recentBookings = bookingsState.status === 'success' ? bookingsState.data.items : []
+  const topShowtimes =
+    showtimesState.status === 'success'
+      ? [...showtimesState.data.items].sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 4)
       : []
 
   if (statsState.status === 'loading') {
@@ -126,9 +126,9 @@ export function AdminDashboard() {
           icon={BookOpen}
         />
         <KpiCard
-          label="Events"
-          value={String(stats.totalEvents)}
-          sub={`${stats.upcomingEvents} scheduled`}
+          label="Showtimes"
+          value={String(stats.totalShowtimes)}
+          sub={`${stats.upcomingShowtimes} scheduled`}
           icon={Calendar}
         />
         <KpiCard
@@ -186,7 +186,7 @@ export function AdminDashboard() {
                       Fan
                     </th>
                     <th className="hidden px-4 py-3 text-left font-mono text-[11px] uppercase tracking-wider text-text-muted md:table-cell">
-                      Event
+                      Showtime
                     </th>
                     <th className="px-4 py-3 text-right font-mono text-[11px] uppercase tracking-wider text-text-muted">
                       Total
@@ -213,7 +213,12 @@ export function AdminDashboard() {
                         <p className="text-[11px] text-text-muted">{b.user?.email ?? ''}</p>
                       </td>
                       <td className="hidden px-4 py-3 text-text-secondary md:table-cell">
-                        {b.event?.title ?? '—'}
+                        <p className="leading-tight">{b.showtime?.screenName ?? '—'}</p>
+                        {b.showtime && (
+                          <p className="text-[11px] text-text-muted">
+                            {formatEventDate(b.showtime.startsAt).split(',')[0]}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
                         {formatPrice(b.totalPrice)}
@@ -229,48 +234,50 @@ export function AdminDashboard() {
           </div>
         </div>
 
-        {/* Top events */}
+        {/* Top showtimes */}
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[17px] font-medium">Top events</h2>
+            <h2 className="text-[17px] font-medium">Top showtimes</h2>
             <Link
-              to="/admin/events"
+              to="/admin/showtimes"
               className="flex items-center gap-1 text-[13px] text-stamp-red hover:underline"
             >
               Manage <ArrowUpRight className="size-3.5" />
             </Link>
           </div>
           <div className="flex flex-col gap-3">
-            {eventsState.status === 'loading' && <Spinner label="Loading events…" className="py-10" />}
-            {eventsState.status === 'error' && (
-              <ErrorState description={eventsState.error.message} onRetry={eventsState.retry} className="py-10" />
+            {showtimesState.status === 'loading' && <Spinner label="Loading showtimes…" className="py-10" />}
+            {showtimesState.status === 'error' && (
+              <ErrorState description={showtimesState.error.message} onRetry={showtimesState.retry} className="py-10" />
             )}
-            {eventsState.status === 'empty' && (
-              <p className="py-10 text-center text-[13px] text-text-muted">No events yet.</p>
+            {showtimesState.status === 'empty' && (
+              <p className="py-10 text-center text-[13px] text-text-muted">No showtimes yet.</p>
             )}
-            {topEvents.map((evt) => {
-              const pct = evt.totalSeats > 0 ? Math.round(((evt.totalSeats - evt.availableSeats) / evt.totalSeats) * 100) : 0
+            {topShowtimes.map((st) => {
+              const pct = st.totalSeats > 0 ? Math.round(((st.totalSeats - st.availableSeats) / st.totalSeats) * 100) : 0
               return (
                 <Link
-                  key={evt.id}
-                  to={`/admin/events/${evt.id}/edit`}
+                  key={st.id}
+                  to={`/admin/showtimes/${st.id}/edit`}
                   className="group block rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-4 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-lift)]"
                 >
                   <p className="font-medium leading-tight group-hover:text-stamp-red transition-colors">
-                    {evt.title}
+                    {st.film?.title ?? st.screenName}
                   </p>
-                  <p className="mt-0.5 text-[12px] text-text-muted">{evt.artist}</p>
+                  <p className="mt-0.5 text-[12px] text-text-muted">
+                    {st.cinema?.name ?? '—'} · {st.screenName}
+                  </p>
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex-1 mr-3 h-1.5 overflow-hidden rounded-full bg-surface-sunk">
                       <div
-                        className="h-full rounded-full bg-stage-green"
+                        className="h-full rounded-full bg-seat-free"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
                     <span className="font-mono text-[11px] text-text-muted shrink-0">{pct}%</span>
                   </div>
                   <p className="mt-1.5 font-mono text-[11px] text-text-muted">
-                    {formatEventDate(evt.date).split(',')[0]}
+                    {formatEventDate(st.startsAt).split(',')[0]}
                   </p>
                 </Link>
               )

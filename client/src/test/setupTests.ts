@@ -35,19 +35,23 @@ afterEach(() => {
 vi.mock('@/lib/socket', () => ({ createSocket }))
 
 // --- Stripe ---
-// CheckoutPage always imports StripeCheckoutForm, which calls loadStripe()
-// at module scope — left real, that reaches out to js.stripe.com on every
-// test run. None of this suite's scenarios need the actual Payment Element
-// to mount (see CheckoutPage.test.tsx), so both vendor modules are replaced
-// with inert stand-ins; StripeCheckoutForm.test.tsx drives the wrapper
-// component's own logic against a controllable `useCheckoutElements` result.
+// CheckoutPage always imports PaymentForm, which calls loadStripe() at
+// module scope — left real, that reaches out to js.stripe.com on every test
+// run. None of this suite's scenarios need the actual Payment Element to
+// mount (see CheckoutPage.test.tsx), so both vendor modules are replaced
+// with inert stand-ins; PaymentForm.test.tsx drives the form's own logic
+// against controllable `useStripe`/`useElements` results (ADR-014's plain
+// Elements/PaymentElement/confirmPayment flow, not the old Checkout
+// Sessions API).
 vi.mock('@stripe/stripe-js', () => ({
   loadStripe: vi.fn(() => Promise.resolve(null)),
 }))
 
-vi.mock('@stripe/react-stripe-js/checkout', () => ({
-  CheckoutElementsProvider: ({ children }: { children: React.ReactNode }) =>
-    React.createElement(React.Fragment, null, children),
+vi.mock('@stripe/react-stripe-js', () => ({
+  Elements: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
   PaymentElement: () => null,
-  useCheckoutElements: vi.fn(() => ({ type: 'loading' as const })),
+  useStripe: vi.fn(() => ({
+    confirmPayment: vi.fn().mockResolvedValue({ paymentIntent: { status: 'succeeded' } }),
+  })),
+  useElements: vi.fn(() => ({})),
 }))

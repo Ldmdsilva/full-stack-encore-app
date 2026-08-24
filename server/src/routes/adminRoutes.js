@@ -7,6 +7,6 @@ const router = Router();
 
 // Admin-only dashboard endpoints (FR-25)
 router.get('/stats', verifyToken, requireRole('admin'), adminController.getStats);
-router.get('/events', verifyToken, requireRole('admin'), adminController.listEvents);
+router.get('/showtimes', verifyToken, requireRole('admin'), adminController.listShowtimes);
 
 export default router;

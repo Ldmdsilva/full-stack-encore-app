@@ -18,16 +18,12 @@ const PAGE_SIZE = 10
 
 const STATUS_LABEL: Record<BookingStatus, string> = {
   confirmed: 'Confirmed',
-  pending: 'Awaiting payment',
   cancelled: 'Cancelled',
-  expired: 'Expired',
 }
 
-const STATUS_VARIANT: Record<BookingStatus, 'confirmed' | 'pending' | 'cancelled' | 'expired'> = {
+const STATUS_VARIANT: Record<BookingStatus, 'confirmed' | 'cancelled'> = {
   confirmed: 'confirmed',
-  pending: 'pending',
   cancelled: 'cancelled',
-  expired: 'expired',
 }
 
 export function MyBookingsPage() {
@@ -40,7 +36,7 @@ export function MyBookingsPage() {
   const { status, data, error, retry } = useAsync(
     () => bookingsApi.listMine({ page, limit: PAGE_SIZE }),
     [page],
-    { isEmpty: (d) => d.bookings.length === 0 },
+    { isEmpty: (d) => d.items.length === 0 },
   )
 
   const closeModal = () => {
@@ -93,33 +89,41 @@ export function MyBookingsPage() {
       {status === 'success' && (
         <>
           <ul className="mt-8 flex flex-col gap-5">
-            {data.bookings.map((b) => (
-              <li key={b.id}>
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-[13px] text-text-muted">
-                    {b.event ? formatEventDate(b.event.date) : 'Event unavailable'} · {b.seats.length}{' '}
-                    {b.seats.length === 1 ? 'seat' : 'seats'} ·{' '}
-                    {formatPrice(b.totalPrice)}
-                  </p>
-                  <Badge variant={STATUS_VARIANT[b.status]}>{STATUS_LABEL[b.status]}</Badge>
-                </div>
-                <TicketStub
-                  variant="compact"
-                  eyebrow={b.event ? formatStubDate(b.event.date) : ''}
-                  title={b.event?.artist ?? 'Event'}
-                  subtitle={b.event?.title ?? ''}
-                  serial={b.reference}
-                  onClick={() => navigate(`/confirmation/${b.id}`)}
-                />
-                {(b.status === 'confirmed' || b.status === 'pending') && (
-                  <div className="mt-2 flex justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => setCancelTarget(b)}>
-                      Cancel booking
-                    </Button>
+            {data.items.map((b) => {
+              const isRefunded = b.status === 'cancelled' && b.paymentStatus === 'refunded'
+              return (
+                <li key={b.id}>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-[13px] text-text-muted">
+                      {b.showtime ? formatEventDate(b.showtime.startsAt) : 'Showtime unavailable'}
+                      {b.showtime ? ` · ${b.showtime.screenName}` : ''} · {b.seats.length}{' '}
+                      {b.seats.length === 1 ? 'seat' : 'seats'} ·{' '}
+                      {formatPrice(b.totalPrice)}
+                    </p>
+                    {isRefunded ? (
+                      <Badge variant="refunded">Refunded</Badge>
+                    ) : (
+                      <Badge variant={STATUS_VARIANT[b.status]}>{STATUS_LABEL[b.status]}</Badge>
+                    )}
                   </div>
-                )}
-              </li>
-            ))}
+                  <TicketStub
+                    variant="compact"
+                    eyebrow={b.showtime ? formatStubDate(b.showtime.startsAt) : ''}
+                    title={b.showtime?.screenName ?? 'Showtime'}
+                    subtitle=""
+                    serial={b.reference}
+                    onClick={() => navigate(`/confirmation/${b.id}`)}
+                  />
+                  {b.status === 'confirmed' && (
+                    <div className="mt-2 flex justify-end">
+                      <Button variant="ghost" size="sm" onClick={() => setCancelTarget(b)}>
+                        Cancel booking
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
 
           {data.totalPages > 1 && (

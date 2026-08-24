@@ -38,6 +38,10 @@ const userSchema = new mongoose.Schema(
       },
       default: 'customer',
     },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
     createdAt: {
       type: Date,
       default: Date.now,

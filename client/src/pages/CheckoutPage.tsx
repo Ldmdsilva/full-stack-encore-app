@@ -1,155 +1,108 @@
 import * as React from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Lock, ShieldCheck } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/Spinner'
 import { ErrorState } from '@/components/ui/ErrorState'
-import { TicketStub } from '@/components/TicketStub'
-import { StripeCheckoutForm } from '@/components/payments/StripeCheckoutForm'
+import { PaymentForm } from '@/components/payments/PaymentForm'
 import { useAsync } from '@/hooks/useAsync'
-import * as eventsApi from '@/lib/api/events'
-import * as bookingsApi from '@/lib/api/bookings'
-import * as paymentsApi from '@/lib/api/payments'
+import { useToast } from '@/components/ui/toast'
+import * as holdsApi from '@/lib/api/holds'
 import { parseApiError } from '@/lib/api/errors'
-import { formatPrice, formatStubDate } from '@/lib/formatters'
-import type { ApiError, Booking } from '@/lib/types'
+import { formatPrice } from '@/lib/formatters'
+import type { ApiError, CreateHoldPaymentIntentResponse } from '@/lib/types'
 
 export function CheckoutPage() {
-  const { eventId } = useParams<{ eventId: string }>()
+  const { holdId } = useParams<{ holdId: string }>()
   const navigate = useNavigate()
+  const { toast } = useToast()
 
-  const selectedIds: string[] = React.useMemo(() => {
-    try {
-      return JSON.parse(sessionStorage.getItem(`encore_selection_${eventId}`) ?? '[]')
-    } catch {
-      return []
-    }
-  }, [eventId])
-
-  // A booking created earlier in this tab that may still have a live hold
-  // (e.g. the checkout page was reloaded) — resumed via payment-session
-  // rather than creating a second booking.
-  const resumableBookingId = React.useMemo(
-    () => sessionStorage.getItem(`encore_booking_${eventId}`),
-    [eventId],
+  const { status, data: hold, error, retry } = useAsync(
+    () => (holdId ? holdsApi.getById(holdId) : Promise.reject(new Error('Missing hold id'))),
+    [holdId],
   )
 
-  const { status, data, error, retry } = useAsync(
-    () => (eventId ? eventsApi.getById(eventId) : Promise.reject(new Error('Missing event id'))),
-    [eventId],
-  )
+  const holdIsActive = status === 'success' && hold.status === 'active'
 
-  const [submitting, setSubmitting] = React.useState(false)
-  const [submitError, setSubmitError] = React.useState<ApiError | null>(null)
-  // Populated on a real 409 SEAT_UNAVAILABLE from the server (ADR-004's
-  // concurrency guard, now targeting `held` instead of `booked`).
-  const [conflictSeatIds, setConflictSeatIds] = React.useState<string[]>([])
-  const [booking, setBooking] = React.useState<Booking | null>(null)
-  const [clientSecret, setClientSecret] = React.useState<string | null>(null)
-  const [resuming, setResuming] = React.useState(Boolean(resumableBookingId))
+  const [intent, setIntent] = React.useState<CreateHoldPaymentIntentResponse | null>(null)
+  const [intentError, setIntentError] = React.useState<ApiError | null>(null)
 
-  const persistBooking = (b: Booking) => {
-    setBooking(b)
-    sessionStorage.setItem(`encore_booking_${eventId}`, b.id)
-  }
-
-  // Resume an existing hold on mount rather than creating a second booking.
+  // Create the PaymentIntent once the hold is confirmed live — never
+  // retried automatically (a retried create could double-create against
+  // the same hold), so a failure here just shows an inline error.
   React.useEffect(() => {
-    if (!resumableBookingId) return
+    if (!holdIsActive || !holdId) return
     let cancelled = false
+    setIntent(null)
+    setIntentError(null)
 
-    Promise.all([bookingsApi.getById(resumableBookingId), paymentsApi.createPaymentSession(resumableBookingId)])
-      .then(([bookingResponse, sessionResponse]) => {
-        if (cancelled) return
-        setBooking(bookingResponse.booking)
-        setClientSecret(sessionResponse.clientSecret)
+    holdsApi
+      .createPaymentIntent(holdId)
+      .then((response) => {
+        if (!cancelled) setIntent(response)
       })
-      .catch(() => {
-        // Hold expired, already paid, or otherwise no longer resumable.
-        if (!cancelled) sessionStorage.removeItem(`encore_booking_${eventId}`)
-      })
-      .finally(() => {
-        if (!cancelled) setResuming(false)
+      .catch((err) => {
+        if (!cancelled) setIntentError(parseApiError(err))
       })
 
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resumableBookingId/eventId are stable for this page's lifetime
-  }, [])
+  }, [holdIsActive, holdId])
 
-  // Guard: no selection means nothing to buy. Skipped once a booking has
-  // been created (or is being resumed) — sessionStorage is cleared at that point.
-  React.useEffect(() => {
-    if (!booking && !resuming && status === 'success' && selectedIds.length === 0) {
-      navigate(`/events/${eventId}`, { replace: true })
-    }
-  }, [status, selectedIds, eventId, navigate, booking, resuming])
+  const handleExpire = React.useCallback(() => {
+    toast('Your seat hold expired. Please select your seats again.', 'error')
+    navigate('/films', { replace: true })
+  }, [toast, navigate])
 
-  if (status === 'loading' || resuming) {
-    return <Spinner label="Loading your selection…" className="py-32" />
+  if (status === 'loading') {
+    return <Spinner label="Loading your reservation…" className="py-32" />
   }
 
   if (status === 'error') {
+    const isGone = error.code === 'HOLD_NOT_FOUND' || error.code === 'HOLD_EXPIRED'
     return (
-      <div className="mx-auto max-w-3xl px-5 py-24">
-        <ErrorState description={error.message} onRetry={retry} />
+      <div className="mx-auto max-w-3xl px-5 py-24 text-center">
+        <ErrorState
+          title={isGone ? 'This reservation is no longer available' : undefined}
+          description={error.message}
+          onRetry={isGone ? undefined : retry}
+        />
+        <Link
+          to="/films"
+          className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium underline underline-offset-2"
+        >
+          <ArrowLeft className="size-4" /> Back to browsing
+        </Link>
       </div>
     )
   }
 
-  if (!eventId || (!booking && selectedIds.length === 0)) return null
+  if (!holdId || !hold) return null
 
-  const event = data.event
-  // Pre-submit: display seats from the current seat map (for the summary
-  // panel only). Post-submit: display the server's own seat snapshot on the
-  // booking, which is what actually gets charged.
-  const previewSeats = data.seats.filter((s) => selectedIds.includes(s.id))
-  const displaySeats: { id: string; section: string; price: number }[] = booking ? booking.seats : previewSeats
-  // Never trust a client-computed total once the server has responded —
-  // `booking.totalPrice` is authoritative from that point on.
-  const previewTotal = previewSeats.reduce((sum, s) => sum + s.price, 0)
-  const total = booking ? booking.totalPrice : previewTotal
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitError(null)
-    setConflictSeatIds([])
-    setSubmitting(true)
-
-    try {
-      const response = await bookingsApi.create({ eventId, seatIds: selectedIds })
-      persistBooking(response.booking)
-      setClientSecret(response.clientSecret)
-      sessionStorage.removeItem(`encore_selection_${eventId}`)
-    } catch (err) {
-      const apiError = parseApiError(err)
-      if (apiError.code === 'SEAT_UNAVAILABLE') {
-        const details = apiError.details as { seatIds?: string[] } | undefined
-        setConflictSeatIds(details?.seatIds?.length ? details.seatIds : selectedIds)
-        // Re-fetch so the seat map reflects server truth — nothing here is
-        // retried automatically.
-        retry()
-      } else {
-        setSubmitError(apiError)
-      }
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const backToSeatMap = () => {
-    sessionStorage.removeItem(`encore_selection_${eventId}`)
-    navigate(`/events/${eventId}`)
+  if (hold.status !== 'active') {
+    return (
+      <div className="mx-auto max-w-3xl px-5 py-24 text-center">
+        <ErrorState
+          title="This reservation is no longer available"
+          description="Your seat hold has expired, or it's already been used. Please select your seats again."
+        />
+        <Link
+          to="/films"
+          className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium underline underline-offset-2"
+        >
+          <ArrowLeft className="size-4" /> Back to browsing
+        </Link>
+      </div>
+    )
   }
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-8">
       <Link
-        to={`/events/${eventId}`}
+        to="/films"
         className="mb-6 inline-flex items-center gap-1.5 text-[13px] text-text-secondary hover:text-foreground"
       >
-        <ArrowLeft className="size-4" /> Back to seat map
+        <ArrowLeft className="size-4" /> Back to browsing
       </Link>
 
       <h1 className="font-voice text-[36px] font-medium tracking-[-0.02em]">Checkout</h1>
@@ -171,96 +124,43 @@ export function CheckoutPage() {
               </p>
             </div>
 
-            {conflictSeatIds.length > 0 && (
-              <div role="alert" className="mt-4 rounded-[var(--radius)] border-[0.5px] border-stamp-red/30 bg-stamp-red/8 px-4 py-3 text-[13px]">
-                <p className="font-medium text-stamp-red">That seat was just taken.</p>
-                <p className="mt-1 text-text-secondary">
-                  Seat{conflictSeatIds.length > 1 ? 's' : ''}{' '}
-                  <span className="font-mono">{conflictSeatIds.join(', ')}</span>{' '}
-                  {conflictSeatIds.length > 1 ? 'were' : 'was'} booked by another fan while you were checking out.
-                  Go back and choose different seats.
-                </p>
-                <button
-                  type="button"
-                  onClick={backToSeatMap}
-                  className="mt-2 text-[13px] font-medium text-stamp-red underline underline-offset-2"
-                >
-                  Back to seat map
-                </button>
-              </div>
-            )}
-
-            {submitError && (
+            {intentError && (
               <p role="alert" className="mt-4 text-[13px] text-destructive">
-                {submitError.message}
+                {intentError.message}
               </p>
             )}
 
-            {!booking ? (
-              <form onSubmit={submit}>
-                <Button
-                  type="submit"
-                  size="lg"
-                  fullWidth
-                  className="mt-6"
-                  isLoading={submitting}
-                  disabled={conflictSeatIds.length > 0}
-                >
-                  {submitting ? 'Reserving your seats…' : `Continue to pay ${formatPrice(total)}`}
-                </Button>
-              </form>
-            ) : (
-              <div className="mt-6">
-                <p className="text-[13px] text-text-secondary">
-                  Booking <span className="font-mono text-foreground">{booking.reference}</span> created —
-                  awaiting payment.
-                </p>
-                {clientSecret && booking.holdExpiresAt && (
-                  <StripeCheckoutForm
-                    clientSecret={clientSecret}
-                    bookingId={booking.id}
-                    eventId={eventId}
-                    holdExpiresAt={booking.holdExpiresAt}
-                  />
-                )}
-              </div>
+            {!intent && !intentError && <Spinner label="Preparing payment…" className="py-8" />}
+
+            {intent && (
+              <PaymentForm
+                holdId={holdId}
+                clientSecret={intent.clientSecret}
+                publishableKey={intent.publishableKey}
+                expiresAt={intent.expiresAt}
+                onExpire={handleExpire}
+              />
             )}
           </div>
         </div>
 
         {/* Summary */}
         <aside className="order-1 lg:order-2">
-          <div className="flex flex-col gap-3">
-            <TicketStub
-              eyebrow={formatStubDate(event.date)}
-              title={event.artist}
-              subtitle={`${event.venue.name} · ${event.venue.city}`}
-              fields={[
-                { label: 'Seats', value: String(displaySeats.length) },
-                { label: 'Section', value: displaySeats[0]?.section ?? '—' },
-                { label: 'Total', value: formatPrice(total) },
-              ]}
-              serial={booking?.reference ?? `ENC-${event.id.slice(-4).toUpperCase()}`}
-            />
-            <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-4">
-              <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted">
-                Seats
-              </p>
-              <ul className="flex flex-col gap-1.5">
-                {displaySeats.map((s) => (
-                  <li key={s.id} className="flex justify-between font-mono text-[13px]">
-                    <span>
-                      {s.id} <span className="text-text-muted">· {s.section}</span>
-                    </span>
-                    <span>{formatPrice(s.price)}</span>
-                  </li>
-                ))}
-              </ul>
-              {!booking && (
-                <p className="mt-3 text-[11px] text-text-muted">
-                  Final total confirmed by the server when your booking is created.
-                </p>
-              )}
+          <div className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-4">
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted">Seats</p>
+            <ul className="flex flex-col gap-1.5">
+              {hold.seatSnapshot.map((s) => (
+                <li key={s.id} className="flex justify-between font-mono text-[13px]">
+                  <span>
+                    {s.id} <span className="text-text-muted">· {s.section}</span>
+                  </span>
+                  <span>{formatPrice(s.price)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex justify-between border-t border-border pt-3 text-[14px] font-medium">
+              <span>Total</span>
+              <span>{formatPrice(hold.totalPrice)}</span>
             </div>
           </div>
         </aside>

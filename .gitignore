@@ -4,8 +4,12 @@
 # convenience scripts.
 node_modules/
 
-# Playwright artifacts (QA/e2e/, QA/playwright.config.ts)
-/QA/test-results/
-/QA/playwright-report/
-/QA/blob-report/
-/QA/playwright/.cache/
+# Root .env — Compose loads this automatically for build args like
+# VITE_STRIPE_PUBLISHABLE_KEY (README.md §3). Never commit it (ADR-007).
+/.env
+
+# Playwright artifacts (source lives in e2e/, playwright.config.ts)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

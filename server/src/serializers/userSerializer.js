@@ -13,6 +13,7 @@ export function serializeUser(user) {
     email: obj.email,
     phone: obj.phone,
     role: obj.role,
+    emailVerified: obj.emailVerified,
     createdAt: obj.createdAt,
   };
 }

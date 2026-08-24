@@ -10,6 +10,7 @@ const badgeVariants = cva(
         confirmed: 'bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-fg)]',
         pending: 'bg-[var(--status-pending-bg)] text-[var(--status-pending-fg)]',
         cancelled: 'bg-[var(--status-cancelled-bg)] text-[var(--status-cancelled-fg)]',
+        refunded: 'bg-[var(--status-refunded-bg)] text-[var(--status-refunded-fg)]',
         expired: 'bg-[var(--status-neutral-bg)] text-[var(--status-neutral-fg)]',
         neutral: 'bg-[var(--status-neutral-bg)] text-[var(--status-neutral-fg)]',
       },

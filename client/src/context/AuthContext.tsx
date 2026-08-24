@@ -1,7 +1,7 @@
 import * as React from 'react'
 import * as authApi from '@/lib/api/auth'
 import { getToken, setToken } from '@/lib/tokenStore'
-import type { LoginPayload, RegisterPayload, UpdateProfilePayload, User } from '@/lib/types'
+import type { LoginPayload, RegisterPayload, RegisterResponse, UpdateProfilePayload, User } from '@/lib/types'
 
 type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 
@@ -11,7 +11,10 @@ interface AuthContextValue {
   status: AuthStatus
   isAdmin: boolean
   login: (payload: LoginPayload) => Promise<void>
-  register: (payload: RegisterPayload) => Promise<void>
+  // D14 — register never issues a token/user, only a status message; it
+  // never touches auth state. `login` remains the only thing that
+  // transitions status to 'authenticated'.
+  register: (payload: RegisterPayload) => Promise<RegisterResponse>
   logout: () => void
   updateProfile: (payload: UpdateProfilePayload) => Promise<void>
 }
@@ -71,11 +74,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const register = React.useCallback(async (payload: RegisterPayload) => {
-    const { user: newUser, token: newToken } = await authApi.register(payload)
-    setToken(newToken)
-    setTokenState(newToken)
-    setUser(newUser)
-    setStatus('authenticated')
+    // No token/user comes back (D14) — registration only ever reports
+    // status; the account still needs email verification, then a separate
+    // `login` call, before `status` can become 'authenticated'.
+    return authApi.register(payload)
   }, [])
 
   const logout = React.useCallback(() => {

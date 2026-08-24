@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, jest } from '@jest/globals';
+import mongoose from 'mongoose';
 import { connectTestDB, clearTestDB, closeTestDB } from '../helpers/db.js';
 import { createStripeMock, mockStripeModule } from '../helpers/mocks.js';
-import Event from '../../src/models/Event.js';
-import Venue from '../../src/models/Venue.js';
+import Film from '../../src/models/Film.js';
+import Cinema from '../../src/models/Cinema.js';
+import Showtime from '../../src/models/Showtime.js';
 import Booking from '../../src/models/Booking.js';
 import User from '../../src/models/User.js';
 
@@ -12,6 +14,16 @@ const stripeMock = createStripeMock();
 mockStripeModule(stripeMock);
 
 let authService;
+
+// register() no longer returns { user, token } (D14: 202 { message } only,
+// no JWT until login) — these tests exercise getUserProfile/updateUserProfile
+// /deleteUserAccount, not register itself, so this helper registers via the
+// real service (still exercising hashing/validation) and then fetches the
+// resulting User document the normal DB way.
+async function registerUser(authServiceRef, params) {
+  await authServiceRef.register(params);
+  return User.findOne({ email: params.email.toLowerCase().trim() });
+}
 
 describe('services/authService.js — additional coverage (profile, account deletion)', () => {
   beforeAll(async () => {
@@ -50,7 +62,7 @@ describe('services/authService.js — additional coverage (profile, account dele
 
   describe('getUserProfile', () => {
     it('returns the user profile for a valid id', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'Profile User',
         email: 'profile@test.com',
         password: 'password123',
@@ -71,7 +83,7 @@ describe('services/authService.js — additional coverage (profile, account dele
 
   describe('updateUserProfile', () => {
     it('updates name, email, and phone together', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'Update Me',
         email: 'updateme@test.com',
         password: 'password123',
@@ -91,7 +103,7 @@ describe('services/authService.js — additional coverage (profile, account dele
 
     it('rejects an email already in use by another account with 409 DUPLICATE_EMAIL', async () => {
       await authService.register({ name: 'User A', email: 'usera@test.com', password: 'password123', phone: '0771234567' });
-      const { user: userB } = await authService.register({
+      const userB = await registerUser(authService, {
         name: 'User B',
         email: 'userb@test.com',
         password: 'password123',
@@ -105,7 +117,7 @@ describe('services/authService.js — additional coverage (profile, account dele
     });
 
     it('rejects an invalid phone with 400 VALIDATION_ERROR', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'Phone Guard User',
         email: 'phoneguard@test.com',
         password: 'password123',
@@ -135,33 +147,46 @@ describe('services/authService.js — additional coverage (profile, account dele
     });
 
     it('anonymises the account, refunds confirmed bookings, releases seats, and cancels pending bookings', async () => {
-      const { user } = await authService.register({
+      const user = await registerUser(authService, {
         name: 'To Delete',
         email: 'todelete@test.com',
         password: 'password123',
         phone: '0771234567',
       });
 
-      const venue = await Venue.create({
-        name: 'Delete Account Hall',
+      const film = await Film.create({
+        title: 'Delete Account Film',
+        synopsis: 'A synopsis.',
+        certificate: 'PG',
+        runtimeMinutes: 100,
+        genre: ['Drama'],
+        releaseDate: new Date(Date.now() - 86400000),
+      });
+      const cinema = await Cinema.create({
+        name: 'Delete Account Cinema',
         address: '1 Delete Ave',
         city: 'Colombo',
-        seatLayout: [
-          { id: 'A-1', section: 'Main', row: 'A', number: 1 },
-          { id: 'A-2', section: 'Main', row: 'A', number: 2 },
+        screens: [
+          {
+            screenId: '1',
+            name: 'Screen 1',
+            seatLayout: [
+              { id: 'A-1', section: 'STANDARD', row: 'A', number: 1 },
+              { id: 'A-2', section: 'STANDARD', row: 'A', number: 2 },
+            ],
+          },
         ],
-        capacity: 2,
       });
-      const event = await Event.create({
-        title: 'Delete Account Event',
-        artist: 'Test',
-        genre: 'Rock',
-        date: new Date(Date.now() + 86400000),
+      const showtime = await Showtime.create({
+        filmRef: film._id,
+        cinemaRef: cinema._id,
+        screenId: '1',
+        screenName: 'Screen 1',
+        startsAt: new Date(Date.now() + 86400000),
         basePrice: 50,
-        venueRef: venue._id,
         seats: [
-          { id: 'A-1', section: 'Main', row: 'A', number: 1, status: 'booked', price: 50 },
-          { id: 'A-2', section: 'Main', row: 'A', number: 2, status: 'held', price: 50 },
+          { id: 'A-1', section: 'STANDARD', row: 'A', number: 1, tier: 'STANDARD', status: 'booked', price: 50 },
+          { id: 'A-2', section: 'STANDARD', row: 'A', number: 2, tier: 'STANDARD', status: 'held', price: 50 },
         ],
         status: 'scheduled',
       });
@@ -169,20 +194,24 @@ describe('services/authService.js — additional coverage (profile, account dele
       const confirmedBooking = await Booking.create({
         reference: 'ENC-DELETE-CONFIRMED',
         userRef: user.id,
-        eventRef: event._id,
-        seats: [{ id: 'A-1', section: 'Main', row: 'A', number: 1, price: 50 }],
+        showtimeRef: showtime._id,
+        holdRef: new mongoose.Types.ObjectId(),
+        paymentIntentId: 'pi_delete_account',
+        paymentStatus: 'succeeded',
+        seats: [{ id: 'A-1', section: 'STANDARD', row: 'A', number: 1, price: 50 }],
         totalPrice: 50,
         status: 'confirmed',
-        payment: { provider: 'stripe', paymentIntentId: 'pi_delete_account' },
       });
-      const pendingBooking = await Booking.create({
-        reference: 'ENC-DELETE-PENDING',
+      const secondConfirmedBooking = await Booking.create({
+        reference: 'ENC-DELETE-CONFIRMED-2',
         userRef: user.id,
-        eventRef: event._id,
-        seats: [{ id: 'A-2', section: 'Main', row: 'A', number: 2, price: 50 }],
+        showtimeRef: showtime._id,
+        holdRef: new mongoose.Types.ObjectId(),
+        paymentIntentId: 'pi_delete_account_2',
+        paymentStatus: 'succeeded',
+        seats: [{ id: 'A-2', section: 'STANDARD', row: 'A', number: 2, price: 50 }],
         totalPrice: 50,
-        status: 'pending',
-        holdExpiresAt: new Date(Date.now() + 600000),
+        status: 'confirmed',
       });
 
       await authService.deleteUserAccount(user.id);
@@ -195,12 +224,13 @@ describe('services/authService.js — additional coverage (profile, account dele
       expect(refundedBooking.status).toBe('cancelled');
       expect(stripeMock.refunds.create).toHaveBeenCalledWith({ payment_intent: 'pi_delete_account' });
 
-      const cancelledPendingBooking = await Booking.findById(pendingBooking._id);
-      expect(cancelledPendingBooking.status).toBe('cancelled');
+      const secondCancelledBooking = await Booking.findById(secondConfirmedBooking._id);
+      expect(secondCancelledBooking.status).toBe('cancelled');
+      expect(stripeMock.refunds.create).toHaveBeenCalledWith({ payment_intent: 'pi_delete_account_2' });
 
-      const updatedEvent = await Event.findById(event._id);
-      expect(updatedEvent.seats.find((s) => s.id === 'A-1').status).toBe('available');
-      expect(updatedEvent.seats.find((s) => s.id === 'A-2').status).toBe('available');
+      const updatedShowtime = await Showtime.findById(showtime._id);
+      expect(updatedShowtime.seats.find((s) => s.id === 'A-1').status).toBe('available');
+      expect(updatedShowtime.seats.find((s) => s.id === 'A-2').status).toBe('available');
     });
   });
 });

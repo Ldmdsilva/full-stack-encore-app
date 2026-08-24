@@ -1,22 +1,16 @@
 import { getWithRetry } from './client'
-import type { AdminEvent, AdminStats } from '../types'
+import type { AdminShowtime, AdminStats, Paginated } from '../types'
 
-export interface ListAdminEventsParams {
+export interface ListAdminShowtimesParams {
   page?: number
   limit?: number
-}
-
-export interface ListAdminEventsResponse {
-  events: AdminEvent[]
-  total: number
-  page: number
-  totalPages: number
 }
 
 export async function stats(): Promise<AdminStats> {
   return getWithRetry('/admin/stats')
 }
 
-export async function listEvents(params: ListAdminEventsParams = {}): Promise<ListAdminEventsResponse> {
-  return getWithRetry('/admin/events', { params })
+// Renamed from the old listEvents/GET /admin/events (server/src/routes/adminRoutes.js).
+export async function listShowtimes(params: ListAdminShowtimesParams = {}): Promise<Paginated<AdminShowtime>> {
+  return getWithRetry('/admin/showtimes', { params })
 }

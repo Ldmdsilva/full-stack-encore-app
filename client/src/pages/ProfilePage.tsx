@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Mail, Trash2 } from 'lucide-react'
+import { User, Mail, Trash2, MailWarning } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Modal } from '@/components/ui/Modal'
@@ -28,8 +28,21 @@ export function ProfilePage() {
   const [savingProfile, setSavingProfile] = React.useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
+  const [resending, setResending] = React.useState(false)
 
   if (!user) return null
+
+  const resendVerification = async () => {
+    setResending(true)
+    try {
+      const { message } = await authApi.resendVerification()
+      toast(message || 'Verification email sent.', 'success')
+    } catch (err) {
+      toast(parseApiError(err).message, 'error')
+    } finally {
+      setResending(false)
+    }
+  }
 
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,6 +93,32 @@ export function ProfilePage() {
           Manage your name, email, and phone number.
         </p>
       </div>
+
+      {/* Email verification notice — absent entirely for a verified user (or
+          when `emailVerified` is missing on stale cached state); see
+          userSerializer's current gap around this field noted in types.ts. */}
+      {user.emailVerified === false && (
+        <section className="mb-5 flex items-start gap-3 rounded-[var(--radius-card)] border-[0.5px] border-[var(--status-pending-fg)]/30 bg-[var(--status-pending-bg)] p-5">
+          <MailWarning className="mt-0.5 size-4 shrink-0 text-[var(--status-pending-fg)]" />
+          <div className="flex-1">
+            <p className="text-[14px] font-medium text-[var(--status-pending-fg)]">
+              Your email isn't verified yet
+            </p>
+            <p className="mt-1 text-[13px] text-text-secondary">
+              Verify it to book tickets.
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-3"
+              onClick={resendVerification}
+              isLoading={resending}
+            >
+              Resend verification email
+            </Button>
+          </div>
+        </section>
+      )}
 
       {/* Profile section */}
       <section className="rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-6">

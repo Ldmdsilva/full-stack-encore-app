@@ -43,6 +43,18 @@
       "src/services/bookingService.js": {
         "lines": 90
       },
+      "src/services/holdService.js": {
+        "lines": 90
+      },
+      "src/services/confirmService.js": {
+        "lines": 95
+      },
+      "src/jobs/paymentReconciler.js": {
+        "lines": 95
+      },
+      "src/services/tokenService.js": {
+        "branches": 100
+      },
       "src/middleware/auth.js": {
         "branches": 100
       }
@@ -53,7 +65,6 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.6.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.3",

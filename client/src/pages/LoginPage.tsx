@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/context/AuthContext'
@@ -36,11 +36,16 @@ export function LoginPage() {
   const [error, setError] = React.useState('')
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
   const [loading, setLoading] = React.useState(false)
+  // Set once registration succeeds — D14: register never logs the user in,
+  // so instead of navigating away we replace the form with a confirmation
+  // and a way back to the sign-in tab.
+  const [registeredMessage, setRegisteredMessage] = React.useState<string | null>(null)
 
   const reset = (next: Mode) => {
     setMode(next)
     setError('')
     setFieldErrors({})
+    setRegisteredMessage(null)
     setName('')
     setEmail('')
     setPhone('')
@@ -83,11 +88,12 @@ export function LoginPage() {
     setLoading(true)
     try {
       if (mode === 'register') {
-        await register({ name: name.trim(), email, password, phone: phone.trim() })
+        const result = await register({ name: name.trim(), email, password, phone: phone.trim() })
+        setRegisteredMessage(result.message)
       } else {
         await login({ email, password })
+        navigate(from, { replace: true })
       }
-      navigate(from, { replace: true })
     } catch (err) {
       const apiError = parseApiError(err)
       const knownFields: (keyof FieldErrors)[] = ['name', 'email', 'password', 'phone']
@@ -120,6 +126,27 @@ export function LoginPage() {
         ? 'border-stamp-red text-foreground'
         : 'border-transparent text-text-secondary hover:text-foreground',
     )
+
+  if (mode === 'register' && registeredMessage) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col px-5 py-16 text-center">
+        <p className="eyebrow text-stamp-red">Almost there</p>
+        <h1 className="mt-3 font-voice text-[36px] font-medium tracking-[-0.02em]">Check your email</h1>
+        <p className="mt-2 text-[15px] text-text-secondary">
+          {registeredMessage || 'Check your email to verify your account, then sign in.'}
+        </p>
+
+        <div className="mt-8 rounded-[var(--radius-card)] border-[0.5px] border-border bg-card p-6">
+          <p className="text-[14px] text-text-secondary">
+            We've sent a verification link to your inbox. Once verified, sign in to start booking.
+          </p>
+          <Button className="mt-6" size="lg" fullWidth onClick={() => reset('signin')}>
+            Go to sign in
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto flex max-w-md flex-col px-5 py-16">
@@ -190,6 +217,14 @@ export function LoginPage() {
             error={fieldErrors.password}
             required
           />
+          {mode === 'signin' && (
+            <Link
+              to="/forgot-password"
+              className="-mt-2 self-end text-[13px] text-text-secondary hover:text-foreground"
+            >
+              Forgot password?
+            </Link>
+          )}
           {mode === 'register' && (
             <Input
               label="Confirm password"
