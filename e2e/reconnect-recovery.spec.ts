@@ -3,18 +3,19 @@ import { loginAs } from './utils/auth';
 import { SEEDED_CUSTOMERS } from './utils/env';
 
 /**
- * SRS §D4.4 journey 6: reconnect recovery.
+ * SRS §D4.4 journey 6: reconnect recovery, on the Showtime domain.
  *
  * The real signal to assert against, read from the actual code rather than
  * guessed:
  *   - client/src/context/SocketContext.tsx exposes `isConnected` (flipped by
  *     the socket's own `connect`/`disconnect` events) and a `reconnectCount`
  *     that bumps specifically on `socket.io`'s `reconnect` event.
- *   - client/src/pages/EventDetailPage.tsx renders that `isConnected` state
- *     directly as visible text next to a radio icon: "Live" vs "Connecting…".
- *   - client/src/hooks/useEventSeats.ts has an effect keyed on
+ *   - client/src/pages/ShowtimePage.tsx renders that `isConnected` state
+ *     directly as visible text next to a Radio icon, in a "Connection" `dl`
+ *     row: "Live" vs "Connecting…".
+ *   - client/src/hooks/useShowtimeSeats.ts has an effect keyed on
  *     `reconnectCount` that calls `load('RESYNC')` — i.e. a full re-fetch of
- *     GET /api/events/:id — specifically so a reconnect never trusts
+ *     GET /api/showtimes/:id — specifically so a reconnect never trusts
  *     whatever seat state was cached across the gap (the effect's own
  *     comment cites FR-16/R7 for this).
  *
@@ -30,18 +31,28 @@ test('after a connection drop, the client shows a reconnecting state and re-fetc
   context,
 }) => {
   await loginAs(page, SEEDED_CUSTOMERS[0].email, SEEDED_CUSTOMERS[0].password);
-  await page.goto('/events');
+
+  // Browse -> a film with at least one bookable showtime -> its seat page.
+  // FilmCard (client/src/components/FilmCard.tsx) gives every poster an
+  // aria-label "View <title>"; FilmDetailPage's showtime buttons render
+  // "from Rs …" for anything with seats left (a sold-out showtime instead
+  // says "Sold out" and is disabled) — seed data guarantees at least one of
+  // each per film.
+  await page.goto('/films');
   await page.getByRole('button', { name: /^View / }).first().click();
-  await expect(page).toHaveURL(/\/events\/[^/]+$/);
-  // The client route is /events/:id; eventsApi.getById() calls GET /events/:id
-  // against the axios baseURL "/api" — i.e. exactly `/api` + this pathname.
-  const eventApiPath = `/api${new URL(page.url()).pathname}`;
+  await expect(page).toHaveURL(/\/films\/[^/]+$/);
+  await page.getByRole('button', { name: /from Rs/ }).first().click();
+  await expect(page).toHaveURL(/\/showtimes\/[^/]+$/);
+  // The client route is /showtimes/:id; showtimesApi.getById() calls
+  // GET /showtimes/:id against the axios baseURL "/api" — i.e. exactly
+  // `/api` + this pathname.
+  const showtimeApiPath = `/api${new URL(page.url()).pathname}`;
 
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 
   let fetchesAfterLoad = 0;
   page.on('request', (req) => {
-    if (req.method() === 'GET' && new URL(req.url()).pathname === eventApiPath) {
+    if (req.method() === 'GET' && new URL(req.url()).pathname === showtimeApiPath) {
       fetchesAfterLoad += 1;
     }
   });
@@ -63,7 +74,7 @@ test('after a connection drop, the client shows a reconnecting state and re-fetc
   // whatever seat array it had cached from before the drop.
   await expect
     .poll(() => fetchesAfterLoad, {
-      message: 'expected a GET /api/events/:id re-fetch after the reconnect (useEventSeats.ts RESYNC)',
+      message: 'expected a GET /api/showtimes/:id re-fetch after the reconnect (useShowtimeSeats.ts RESYNC)',
       timeout: 10_000,
     })
     .toBeGreaterThan(0);

@@ -26,9 +26,17 @@ import { reapExpiredHoldsForShowtime, releaseSeatsForHold } from '../jobs/holdRe
  * @param {string} params.userId
  * @param {string} params.showtimeId
  * @param {string[]} params.seatIds
+ * @param {number} [params.ttlMs] - test-only TTL override in milliseconds,
+ *   in place of `env.HOLD_TTL_MINUTES`. Only ever populated by
+ *   `holdController.createHold` from a request header it reads itself
+ *   ONLY when `NODE_ENV !== 'production'` (§D4.4 journey J5/"hold expiry" —
+ *   waiting out a real 10-minute default TTL in an e2e run is impractical).
+ *   Never derived from the request body (`createHoldSchema` is `.strict()`
+ *   on purpose) and never available in production regardless of what a
+ *   caller sends.
  * @returns {Promise<object>} the created Hold document
  */
-export async function createHold({ userId, showtimeId, seatIds }) {
+export async function createHold({ userId, showtimeId, seatIds, ttlMs }) {
   if (!showtimeId || !Array.isArray(seatIds) || seatIds.length === 0) {
     throw new AppError(
       'showtimeId and a non-empty array of seatIds are required',
@@ -77,7 +85,8 @@ export async function createHold({ userId, showtimeId, seatIds }) {
   // endpoint's request body at all; `createHoldSchema` is `.strict()`).
   const { totalPrice, currency } = computeSeatTotal(showtime, uniqueSeatIds);
 
-  const holdExpiresAt = new Date(Date.now() + env.HOLD_TTL_MINUTES * 60 * 1000);
+  const effectiveTtlMs = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : env.HOLD_TTL_MINUTES * 60 * 1000;
+  const holdExpiresAt = new Date(Date.now() + effectiveTtlMs);
 
   // 5. Pre-generate the Hold's _id before the atomic update: the update
   // needs to write this id into the showtime seats' `holdRef` field in the

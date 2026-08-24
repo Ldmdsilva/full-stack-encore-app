@@ -17,8 +17,9 @@ export function effectiveSeatStatus(seat, now = new Date()) {
 
 /**
  * Serialize a populated-or-not `filmRef` down to the compact shape embedded
- * in showtime listings, mirroring `venueSerializer.serializeVenueRef`'s
- * populate-tolerant handling.
+ * in showtime listings with populate-tolerant handling: works whether Mongoose
+ * has populated the ref (returning the full Film document) or left it as a
+ * raw ObjectId string.
  * @param {object|string} film
  * @returns {{id:string,title?:string,posterUrl?:string,certificate?:string,runtimeMinutes?:number}|null}
  */

@@ -1,4 +1,5 @@
 import * as holdService from '../services/holdService.js';
+import { env } from '../config/env.js';
 
 /**
  * POST /api/holds (§C7.1). Creates the Hold only — no Stripe call (D12).
@@ -8,7 +9,23 @@ import * as holdService from '../services/holdService.js';
 export async function createHold(req, res, next) {
   try {
     const { showtimeId, seatIds } = req.body;
-    const hold = await holdService.createHold({ userId: req.user.id, showtimeId, seatIds });
+
+    // Test-only escape hatch for the e2e hold-expiry journey (SRS §D4.4 J5):
+    // waiting out the real `HOLD_TTL_MINUTES` (10 min default) in a browser
+    // test is impractical, and the sweeper's own 60s cadence would make the
+    // "live read-through before the sweeper runs" assertion the journey
+    // exists to prove impossible to observe reliably. Rides on a header
+    // instead of the request body, since `createHoldSchema` is deliberately
+    // `.strict()` (no client-supplied field belongs in that contract) — and
+    // is only ever honoured outside production, so it can never affect a
+    // real deployment no matter what a caller sends.
+    let ttlMs;
+    if (env.NODE_ENV !== 'production') {
+      const requested = Number(req.get('X-E2E-Hold-Ttl-Ms'));
+      if (Number.isFinite(requested) && requested > 0) ttlMs = requested;
+    }
+
+    const hold = await holdService.createHold({ userId: req.user.id, showtimeId, seatIds, ttlMs });
     return res.status(201).json({
       holdId: hold._id.toString(),
       expiresAt: hold.expiresAt,

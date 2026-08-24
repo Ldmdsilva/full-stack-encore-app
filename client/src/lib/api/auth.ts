@@ -1,4 +1,4 @@
-import { apiClient, getWithRetry } from './client'
+import { apiClient } from './client'
 import type {
   ForgotPasswordPayload,
   ForgotPasswordResponse,
@@ -50,7 +50,11 @@ export async function resetPassword(payload: ResetPasswordPayload): Promise<Rese
 }
 
 export async function getMe(): Promise<{ user: User }> {
-  return getWithRetry('/users/me')
+  // Direct GET, not getWithRetry: a 401 (invalid/expired/revoked token) is
+  // not a transient network failure — retrying it adds 900 ms of backoff
+  // and fires the 401 interceptor's setToken(null) + redirect three times.
+  const { data } = await apiClient.get<{ user: User }>('/users/me')
+  return data
 }
 
 export async function updateMe(payload: UpdateProfilePayload): Promise<{ user: User }> {

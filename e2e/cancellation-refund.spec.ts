@@ -1,47 +1,106 @@
 import { test, expect, type Page } from '@playwright/test';
-import { loginAs } from './utils/auth';
 import { firstAvailableSeat, seatButton, seatIdFromLocator } from './utils/seats';
-import { isStripeConfigured, isWebhookForwardingAvailable, SEEDED_CUSTOMERS } from './utils/env';
+import { isStripeConfigured } from './utils/env';
 
 /**
- * SRS §D4.4 journey 4: cancellation round-trip with refund.
+ * SRS §D4.4 journey 4 (J8): cancellation round-trip with refund.
  *
- * Two tests, gated at different levels of what's actually achievable
- * without live Stripe infrastructure in this environment:
- *   - "pending" cancellation only needs a successful booking creation
- *     (real Stripe TEST keys to open the Checkout Session), so it's gated
- *     on `isStripeConfigured()` alone. Cancelling a `pending` booking never
- *     calls Stripe's refund API (server/src/services/bookingService.js's
- *     `cancelBooking` only refunds when `wasConfirmed`), so this verifies
- *     the seat-release half of the round trip.
- *   - "confirmed" cancellation needs a booking that actually reached
- *     `confirmed`, which needs the full webhook leg — gated additionally on
- *     `isWebhookForwardingAvailable()`. This is the one that verifies an
- *     actual refund.
+ * Booking no longer has a `pending` status (server/src/models/Booking.js's
+ * `status` enum is just `confirmed | cancelled`, ADR-014) — an unpaid
+ * reservation is now a Hold, not a Booking. The old "cancel a pending
+ * booking" test therefore has no equivalent any more; it's replaced below
+ * with a hold-release test that exercises the same seat-round-trip idea one
+ * layer earlier in the flow, and needs no Stripe at all since holds never
+ * touch Stripe (D12).
  *
- * Neither test fakes a webhook call to force a `confirmed` status — see the
- * payment journey spec for why.
+ * The second test — cancelling a real `confirmed` booking and checking the
+ * refund — is unchanged in spirit. It still needs real Stripe TEST-mode keys
+ * to reach a genuine `confirmed` booking, but no longer needs a webhook
+ * forwarder to get there: confirmation is synchronous from the client's
+ * perspective under ADR-014 (see README.md §8 and the
+ * register-browse-book-pay-confirm spec).
  */
 
-async function selectSeatAndCreatePendingBooking(page: Page) {
-  await page.goto('/events');
+interface JourneyCustomer {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+}
+
+/** Self-contained register -> verify -> login flow (mirrors J7's helper). */
+async function registerVerifyAndLogin(page: Page): Promise<JourneyCustomer> {
+  const unique = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const customer: JourneyCustomer = {
+    name: 'E2E Test Customer',
+    email: `e2e.j8.${unique}@example.test`,
+    phone: `07${unique.slice(-8).padStart(8, '1')}`,
+    password: 'Password123!',
+  };
+
+  await page.goto('/register');
+  await page.getByLabel('Full name').fill(customer.name);
+  await page.getByLabel('Email').fill(customer.email);
+  await page.getByLabel('Mobile number').fill(customer.phone);
+  await page.getByLabel('Password', { exact: true }).fill(customer.password);
+  await page.getByLabel('Confirm password').fill(customer.password);
+  await page.getByRole('button', { name: 'Create account' }).click();
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+
+  const mailResponse = await page.request.get(
+    `/api/dev/last-mail?email=${encodeURIComponent(customer.email)}`,
+  );
+  expect(mailResponse.ok()).toBe(true);
+  const mail = await mailResponse.json();
+  const token = (mail.text as string).match(/token=([0-9a-f]+)/)?.[1];
+  if (!token) {
+    throw new Error(`No verification token found in the email sent to ${customer.email}: ${mail.text}`);
+  }
+
+  await page.goto(`/verify-email?token=${token}`);
+  await expect(page.getByText('Your email is verified')).toBeVisible();
+
+  await page.goto('/login');
+  const form = page.locator('form');
+  await page.getByLabel('Email').fill(customer.email);
+  await page.getByLabel('Password', { exact: true }).fill(customer.password);
+  await form.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).not.toHaveURL(/\/login$/);
+
+  return customer;
+}
+
+/** Browse to a showtime, select the first available seat, and create a Hold. */
+async function selectSeatAndCreateHold(page: Page) {
+  await page.goto('/films');
   await page.getByRole('button', { name: /^View / }).first().click();
-  await expect(page).toHaveURL(/\/events\/[^/]+$/);
-  const eventUrl = page.url();
+  await expect(page).toHaveURL(/\/films\/[^/]+$/);
+
+  const showtimeButton = page
+    .locator('[data-testid^="cinema-group-"] button')
+    .filter({ hasNotText: 'Sold out' })
+    .first();
+  await expect(showtimeButton).toBeVisible();
+  await showtimeButton.click();
+  await expect(page).toHaveURL(/\/showtimes\/[^/]+$/);
+  const showtimeUrl = page.url();
 
   const seat = firstAvailableSeat(page);
   await expect(seat).toBeVisible();
   const seatId = await seatIdFromLocator(seat);
   await seat.click();
-  await page.getByRole('button', { name: 'Continue to checkout' }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+
   await expect(page).toHaveURL(/\/checkout\/[^/]+$/);
-  await page.getByRole('button', { name: /^Continue to pay/ }).click();
+  const holdId = page.url().match(/\/checkout\/([^/]+)$/)![1];
 
-  const bookingText = page.getByText(/^Booking ENC-/);
-  await expect(bookingText).toBeVisible();
-  const reference = (await bookingText.textContent())!.match(/ENC-[A-Z0-9-]+/)![0];
+  return { showtimeUrl, seatId, holdId };
+}
 
-  return { eventUrl, seatId, reference };
+async function authToken(page: Page): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('encore_token'));
+  if (!token) throw new Error('Expected an auth token in localStorage after logging in.');
+  return token;
 }
 
 async function cancelBookingByReference(page: Page, reference: string) {
@@ -55,68 +114,80 @@ async function cancelBookingByReference(page: Page, reference: string) {
   return row;
 }
 
-test('cancelling a pending (unpaid) booking releases its seat back to available', async ({ page }) => {
-  test.skip(
-    !isStripeConfigured(),
-    'Booking creation needs real Stripe TEST-mode keys (see the register-browse-book-pay-confirm ' +
-      'spec) — without them there is no pending booking to cancel.',
-  );
+test('releasing a hold returns its seat to available (replaces the old pending-booking cancel)', async ({
+  page,
+}) => {
+  // Holds never touch Stripe (D12) — this needs no Stripe configuration at all.
+  await registerVerifyAndLogin(page);
+  const { showtimeUrl, seatId, holdId } = await selectSeatAndCreateHold(page);
 
-  await loginAs(page, SEEDED_CUSTOMERS[1].email, SEEDED_CUSTOMERS[1].password);
-  const { eventUrl, seatId, reference } = await selectSeatAndCreatePendingBooking(page);
+  // CheckoutPage has no explicit "cancel"/"release" button of its own, so
+  // simulate an abandoned checkout the same way a closed tab or a lapsed
+  // hold would: release the hold directly via its API (DELETE /api/holds/:id
+  // — holdController.releaseHold, idempotent, 204 no body).
+  const token = await authToken(page);
+  const releaseResponse = await page.request.delete(`/api/holds/${holdId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(releaseResponse.ok()).toBe(true);
 
-  const row = page.locator('li', { hasText: reference });
-  await expect(row.getByText('Awaiting payment')).toBeVisible();
-
-  await cancelBookingByReference(page, reference);
-
-  // Round trip: the seat this booking held is available again, observed on
-  // a fresh navigation back to the event (not claiming realtime here — that
-  // is the dedicated realtime-seat-propagation spec's job).
-  await page.goto(eventUrl);
+  // Round trip: a fresh navigation back to the showtime shows the seat this
+  // hold reserved as available again (not claiming realtime here — that is
+  // the dedicated realtime-seat-propagation spec's job).
+  await page.goto(showtimeUrl);
   await expect(seatButton(page, seatId)).toHaveAttribute('aria-label', /, available$/);
 });
 
 test('cancelling a confirmed (paid) booking issues a refund and releases its seat', async ({ page }) => {
   test.skip(
-    !isStripeConfigured() || !isWebhookForwardingAvailable(),
-    'Requires real Stripe TEST-mode keys AND a `stripe listen --forward-to ' +
-      'localhost:5000/api/payments/webhook` process running locally (set ' +
-      'E2E_STRIPE_WEBHOOK_FORWARDING=1 once it is) — a genuine refund can only be checked ' +
-      'against a booking that actually reached `confirmed` via a real webhook, which this test ' +
+    !isStripeConfigured(),
+    'Reaching a real `confirmed` booking needs real Stripe TEST-mode keys in server/.env and ' +
+      'client/.env (see the register-browse-book-pay-confirm spec) — a genuine refund can only ' +
+      'be checked against a booking that actually went through Stripe, which this test ' +
       'deliberately does not fake.',
   );
 
-  await loginAs(page, SEEDED_CUSTOMERS[2].email, SEEDED_CUSTOMERS[2].password);
-  const { eventUrl, seatId } = await selectSeatAndCreatePendingBooking(page);
+  await registerVerifyAndLogin(page);
+  const { showtimeUrl, seatId } = await selectSeatAndCreateHold(page);
+
+  await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
 
   const stripeFrame = page.frameLocator('iframe[name^="__privateStripeFrame"]').first();
   await expect(stripeFrame.locator('body')).toBeVisible({ timeout: 15_000 });
   await stripeFrame.getByPlaceholder('Card number').fill('4242424242424242');
   await stripeFrame.getByPlaceholder('MM / YY').fill('12/34');
   await stripeFrame.getByPlaceholder('CVC').fill('123');
+  const postalField = stripeFrame.getByPlaceholder('ZIP').or(stripeFrame.getByPlaceholder('Postal code'));
+  if (await postalField.count()) {
+    await postalField.first().fill('10100');
+  }
   await page.getByRole('button', { name: 'Pay now' }).click();
 
+  // ADR-014: confirmation is synchronous — no webhook forwarder needed to
+  // reach `confirmed` any more.
   await expect(page).toHaveURL(/\/confirmation\/([^/]+)$/, { timeout: 20_000 });
   const bookingId = page.url().match(/\/confirmation\/([^/]+)$/)![1];
-  await expect(page.getByRole('heading', { name: "You're going." })).toBeVisible({ timeout: 35_000 });
+  await expect(page.getByRole('heading', { name: "You're going." })).toBeVisible({ timeout: 20_000 });
   const reference = (await page.getByText(/^Booking ENC-/).textContent())!.match(/ENC-[A-Z0-9-]+/)![0];
 
-  await cancelBookingByReference(page, reference);
+  const row = await cancelBookingByReference(page, reference);
 
-  // The cancel confirmation modal / badge don't surface the refund id in
-  // the UI at all, so check the authoritative source: the booking API
-  // response itself, authenticated the same way the app's own axios client
-  // does (Bearer token from localStorage — see client/src/lib/tokenStore.ts).
-  const token = await page.evaluate(() => localStorage.getItem('encore_token'));
+  // MyBookingsPage renders a distinct "Refunded" badge once a cancelled
+  // booking's paymentStatus is `refunded` (client/src/pages/MyBookingsPage.tsx).
+  await expect(row.getByText('Refunded', { exact: true })).toBeVisible();
+
+  // Cross-check against the authoritative source: the booking API response
+  // itself, authenticated the same way the app's own axios client does
+  // (Bearer token from localStorage — see client/src/lib/tokenStore.ts).
+  const token = await authToken(page);
   const apiResponse = await page.request.get(`/api/bookings/${bookingId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(apiResponse.ok()).toBe(true);
   const { booking } = await apiResponse.json();
   expect(booking.status).toBe('cancelled');
-  expect(booking.payment?.refundId).toBeTruthy();
+  expect(booking.paymentStatus).toBe('refunded');
 
-  await page.goto(eventUrl);
+  await page.goto(showtimeUrl);
   await expect(seatButton(page, seatId)).toHaveAttribute('aria-label', /, available$/);
 });

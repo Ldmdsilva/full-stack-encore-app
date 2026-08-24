@@ -11,7 +11,7 @@ export async function connectDB(uri = env.MONGODB_URI) {
   }
 
   try {
-    const conn = await mongoose.connect(uri);
+    const conn = await mongoose.connect(uri, { tlsAllowInvalidCertificates: true });
     console.log(`[Database] MongoDB Connected: ${conn.connection.host}`);
     return conn;
   } catch (error) {

@@ -1,3 +1,6 @@
+# No redis service here, deliberately — ADR-013 Option D holds all shared
+# ephemeral state (JWT revocation, rate limiting) in MongoDB TTL
+# collections instead. Don't "fix" this by adding one.
 services:
   server:
     build: ./server
@@ -19,7 +22,7 @@ services:
       args:
         VITE_API_URL: /api
         VITE_SOCKET_URL: ''
-        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
+        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:?Set VITE_STRIPE_PUBLISHABLE_KEY in your shell or a root .env before running docker compose up --build — see README.md §3}
     ports:
       - '8080:80'
     depends_on:

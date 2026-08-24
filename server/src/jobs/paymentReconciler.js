@@ -2,6 +2,7 @@ import Hold from '../models/Hold.js';
 import * as paymentService from '../services/paymentService.js';
 import { fulfilHold } from '../services/confirmService.js';
 import { logger } from '../config/logger.js';
+import { env } from '../config/env.js';
 
 // FR-39 (ADR-014): a customer who pays then closes the tab before their
 // confirm call lands must still get their booking. This job is
@@ -9,7 +10,7 @@ import { logger } from '../config/logger.js';
 // exist in our own DB (`status: 'active'` with a `paymentIntentId`), so it
 // is bounded and deterministic rather than scanning Stripe's full
 // PaymentIntent history.
-const RECONCILE_INTERVAL_MS = 2 * 60 * 1000;
+const RECONCILE_INTERVAL_MS = env.RECONCILE_INTERVAL_MINUTES * 60 * 1000;
 let intervalHandle = null;
 
 /**
@@ -47,7 +48,7 @@ export async function reconcilePendingHolds() {
 
 /**
  * Start the background sweep that reconciles paid-but-unconfirmed holds
- * every 2 minutes (FR-39). Mirrors `holdReaper.js`'s
+ * every `RECONCILE_INTERVAL_MINUTES` minutes (FR-39). Mirrors `holdReaper.js`'s
  * `startHoldReaper`/`stopHoldReaper` guard/interval pattern exactly.
  * @returns {NodeJS.Timeout}
  */

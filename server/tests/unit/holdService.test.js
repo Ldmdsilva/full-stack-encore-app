@@ -190,6 +190,44 @@ describe('services/holdService.js (§C6.2, D6, D12)', () => {
       expect(holdCount).toBe(0);
     });
 
+    it('honours a ttlMs override in place of env.HOLD_TTL_MINUTES (test-only escape hatch, §D4.4 J5)', async () => {
+      const showtime = await createShowtime();
+      const user = await createUser();
+      const before = Date.now();
+
+      const hold = await holdService.createHold({
+        userId: user._id.toString(),
+        showtimeId: showtime._id.toString(),
+        seatIds: ['A-1'],
+        ttlMs: 5000,
+      });
+
+      const expiresInMs = hold.expiresAt.getTime() - before;
+      // Comfortably inside the 5s override and nowhere near the real
+      // HOLD_TTL_MINUTES default (10 minutes) — proves the override, not the
+      // configured default, drove this hold's expiry.
+      expect(expiresInMs).toBeGreaterThan(0);
+      expect(expiresInMs).toBeLessThanOrEqual(6000);
+    });
+
+    it('ignores a non-positive or non-finite ttlMs and falls back to env.HOLD_TTL_MINUTES', async () => {
+      const showtime = await createShowtime();
+      const user = await createUser();
+      const before = Date.now();
+
+      const hold = await holdService.createHold({
+        userId: user._id.toString(),
+        showtimeId: showtime._id.toString(),
+        seatIds: ['A-1'],
+        ttlMs: -1,
+      });
+
+      const expiresInMs = hold.expiresAt.getTime() - before;
+      // env.HOLD_TTL_MINUTES defaults to 10 in this suite's environment —
+      // a bogus override must never shrink that to something e2e-fast.
+      expect(expiresInMs).toBeGreaterThan(6000);
+    });
+
     it('throws VALIDATION_ERROR for an empty seatIds array', async () => {
       const user = await createUser();
       await expect(

@@ -17,11 +17,9 @@ const REPO_ROOT = __dirname;
  *     (STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / VITE_STRIPE_PUBLISHABLE_KEY).
  *     Specs detect placeholder keys (see e2e/utils/env.ts) and skip the
  *     parts of the journey that need a real key, with a clear reason.
- *   - For the final `pending -> confirmed` webhook leg specifically, a
- *     `stripe listen --forward-to localhost:5000/api/payments/webhook`
- *     process running locally, AND the E2E_STRIPE_WEBHOOK_FORWARDING=1
- *     env var set so the specs know it's safe to wait for a real webhook
- *     instead of skipping that assertion.
+ *     Confirmation itself is synchronous from the client's perspective
+ *     (ADR-014) — no webhook, no forwarding process, so real Stripe keys are
+ *     the only external prerequisite left for the payment journeys.
  */
 export default defineConfig({
   testDir: './e2e',

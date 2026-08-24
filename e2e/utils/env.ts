@@ -30,29 +30,19 @@ const clientEnv = parseEnvFile(path.join(REPO_ROOT, 'client', '.env'));
 /**
  * True only once server/.env and client/.env carry what look like real
  * Stripe TEST-mode keys rather than the `sk_test_your_stripe_secret_key`
- * placeholders shipped in .env.example. Booking creation itself calls the
- * real Stripe API to open a Checkout Session (see
- * server/src/services/bookingService.js), so *nothing* past "select seats"
- * in the booking journey works without this — not just the final webhook
- * confirmation.
+ * placeholders shipped in .env.example. Creating a Hold itself never touches
+ * Stripe (ADR-014, D12) — register/browse/select-seats/hold all work
+ * regardless — but creating a PaymentIntent for that hold
+ * (POST /api/holds/:id/payment-intent) and everything from there onward
+ * (paying with Stripe.js, confirming the booking) needs this. See the
+ * register-browse-book-pay-confirm and cancellation-refund specs for where
+ * exactly each journey gates on it.
  */
 export function isStripeConfigured(): boolean {
   const secret = serverEnv.STRIPE_SECRET_KEY ?? '';
   const publishable = clientEnv.VITE_STRIPE_PUBLISHABLE_KEY ?? '';
   const looksReal = (v: string, prefix: string) => v.startsWith(prefix) && !v.includes('your_stripe');
   return looksReal(secret, 'sk_test_') && looksReal(publishable, 'pk_test_');
-}
-
-/**
- * True when the developer running the suite has told us a `stripe listen`
- * process is actively forwarding webhooks to the local server. There is no
- * reliable way to detect this automatically from inside a test, so it's an
- * opt-in env var rather than inferred — see the plan's note that a fully
- * automated "pay" step in a CI-less local run needs either a running
- * forwarder or a tolerant test.
- */
-export function isWebhookForwardingAvailable(): boolean {
-  return process.env.E2E_STRIPE_WEBHOOK_FORWARDING === '1';
 }
 
 export const SEEDED_ADMIN = { email: 'admin@encore.live', password: 'Admin123!' };

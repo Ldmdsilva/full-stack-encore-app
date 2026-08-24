@@ -43,6 +43,18 @@
       "src/services/bookingService.js": {
         "lines": 90
       },
+      "src/services/holdService.js": {
+        "lines": 90
+      },
+      "src/services/confirmService.js": {
+        "lines": 95
+      },
+      "src/jobs/paymentReconciler.js": {
+        "lines": 95
+      },
+      "src/services/tokenService.js": {
+        "branches": 100
+      },
       "src/middleware/auth.js": {
         "branches": 100
       }
